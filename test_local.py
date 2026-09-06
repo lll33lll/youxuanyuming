@@ -75,5 +75,39 @@ existing = [{"id": "stale", "content": "1.2.3.4", "comment": bestdomain.MANAGED_
 calls = run_case(existing_records=existing, dry_run=True)
 check("无任何写操作", not any(c[0] in ("POST", "DELETE") for c in calls))
 
+print("== 场景6：反代域名（cf_only=False）保留非官方网段 IP ==")
+import tempfile, os
+with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+    f.write("1.2.3.4\n8.8.8.8\n104.17.53.242\n10.0.0.1\n")  # 1.2.3.4 非CF段，8.8.8.8 非CF段，10.x 内网
+    proxyfile = f.name
+try:
+    official_only = bestdomain.extract_ips(open(proxyfile).read(), cf_only=True)
+    proxy_mode = bestdomain.extract_ips(open(proxyfile).read(), cf_only=False)
+    check("官方模式只剩CF段IP", official_only == ["104.17.53.242"], str(official_only))
+    check("反代模式保留公网非CF IP", proxy_mode == ["1.2.3.4", "8.8.8.8", "104.17.53.242"], str(proxy_mode))
+finally:
+    os.unlink(proxyfile)
+
+print("== 场景7：反代子域名 cf_only=False 全流程 ==")
+with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+    f.write("45.77.254.160\n8.218.36.133\n")  # 两个非CF的公网IP
+    proxyfile = f.name
+try:
+    calls = []
+    def fake_cf(method, path, body=None):
+        calls.append((method, path, body))
+        if path.startswith("/zones?"):
+            return [{"id": "z0", "name": "223226.xyz"}]
+        return []
+    bestdomain.cf = fake_cf
+    bestdomain.update_subdomain("z0", "223226.xyz", "proxy", [proxyfile], False, cf_only=False)
+    posts = [c for c in calls if c[0] == "POST"]
+    check("反代域名添加了非CF IP", len(posts) == 2 and {c[2]["content"] for c in posts} == {"45.77.254.160", "8.218.36.133"})
+    calls.clear()
+    bestdomain.update_subdomain("z0", "223226.xyz", "proxy", [proxyfile], False, cf_only=True)
+    check("同样内容走官方模式被全部过滤（无写入）", not any(c[0] == "POST" for c in calls))
+finally:
+    os.unlink(proxyfile)
+
 print(f"\n结果：{PASS} 通过，{FAIL} 失败")
 sys.exit(1 if FAIL else 0)

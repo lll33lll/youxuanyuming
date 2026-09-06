@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-采集 Cloudflare 优选 IPv4，写入 ip.txt（去重、校验、限量）。
+采集 Cloudflare 优选 IPv4，产出两个文件：
+
+- ip.txt    官方网段优选 IP（cf. / cloudflare. 域名用，只保留 CF 官方网段）
+- proxy.txt 第三方反代节点 IP（proxy. 域名用）
 
 特点：
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
-- 单个数据源挂了自动跳过，全部挂掉则报错退出且不动旧 ip.txt
-- 只保留「Cloudflare 官方网段」内的公网 IPv4：第三方反代 IP 会把流量
-  导到陌生人的服务器上，一律过滤掉（见 CF_V4_RANGES）
+- 单个数据源挂了自动跳过；官方源全挂则报错退出且不动旧文件
+- 反代源里只保留 "IP:443" 格式的行（DNS 优选域名只对 443 端口有意义）
 """
 import ipaddress
 import re
@@ -15,7 +17,7 @@ import sys
 import time
 import urllib.request
 
-# 数据源（按优先级排序，越靠前质量越高；抓不满配额时优先用靠前的）
+# ============ 官方 IP 数据源（按优先级排序）============
 SOURCES = [
     # IPDB 优选官方 IP（每小时更新，原项目数据源 ipdb 的新版 API 格式）
     {"name": "IPDB bestcf", "url": "https://ipdb.api.030101.xyz/?type=bestcf"},
@@ -33,6 +35,17 @@ SOURCES = [
     {"name": "wetest.vip", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
 ]
 
+# ============ 反代 IP 数据源（第三方架设的中转节点，流量会经过第三方服务器）============
+# port443_only=True 的源只保留 "IP:443" 格式的行（非 443 端口对 DNS 优选域名无意义）
+PROXY_SOURCES = [
+    # IPDB 优选反代 IP（每小时实测）
+    {"name": "IPDB bestproxy", "url": "https://ipdb.api.030101.xyz/?type=bestproxy", "port443_only": False},
+    # 陕西移动实测高速优选（带延迟/带宽标注）
+    {"name": "gaoji.uk 高速优选", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True},
+    # 多项目聚合 bestips（每 3 小时更新）
+    {"name": "LancelotRar bestips", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "port443_only": True},
+]
+
 # Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
 # 若 Cloudflare 将来调整网段，需要同步更新这里
 CF_V4_RANGES = [
@@ -43,15 +56,9 @@ CF_V4_RANGES = [
 ]
 _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
 
-
-def is_cloudflare_ip(ip) -> bool:
-    """是否属于 Cloudflare 官方网段（排除第三方反代/伙伴 IP）。"""
-    return any(ip in net for net in _CF_NETS)
-
-
-# ip.txt 最多保留多少个 IP（防止数据源异常返回海量地址，撑爆 DNS 记录）
-MAX_IPS = 50
-OUTPUT_FILE = "ip.txt"
+# 输出上限
+MAX_IPS = 50        # ip.txt（官方优选）
+MAX_PROXY_IPS = 30  # proxy.txt（反代，取质量优先的前 30 个）
 TIMEOUT = 20
 RETRIES = 2
 
@@ -61,6 +68,7 @@ HEADERS = {
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+LINE_443_PATTERN = re.compile(r"^\s*((?:\d{1,3}\.){3}\d{1,3}):443\b")
 
 
 def fetch_text(url: str) -> str:
@@ -76,31 +84,51 @@ def fetch_text(url: str) -> str:
     raise last_err
 
 
+def _valid_public_ipv4(raw: str):
+    try:
+        ip = ipaddress.ip_address(raw)
+    except ValueError:
+        return None
+    return ip if (ip.version == 4 and ip.is_global) else None
+
+
 def extract_ips(text: str):
+    """官方优选：只收 Cloudflare 官方网段的公网 IPv4。"""
     found = []
     for raw in IP_PATTERN.findall(text):
-        try:
-            ip = ipaddress.ip_address(raw)
-        except ValueError:
-            continue
-        # 只收 Cloudflare 官方网段的公网 IPv4
-        if ip.version == 4 and ip.is_global and is_cloudflare_ip(ip):
+        ip = _valid_public_ipv4(raw)
+        if ip and any(ip in net for net in _CF_NETS):
             found.append(raw)
     return found
 
 
-def main() -> int:
-    merged = []  # 按数据源优先级顺序保留
+def extract_proxy_ips(text: str, port443_only: bool = False):
+    """反代 IP：公网 IPv4 即可（不限 CF 网段）；可只保留 :443 端口的行。"""
+    found = []
+    if port443_only:
+        for line in text.splitlines():
+            m = LINE_443_PATTERN.match(line)
+            if m and _valid_public_ipv4(m.group(1)):
+                found.append(m.group(1))
+        return found
+    for raw in IP_PATTERN.findall(text):
+        if _valid_public_ipv4(raw):
+            found.append(raw)
+    return found
+
+
+def run_collection(sources, extract, label):
+    """跑一组数据源，返回按优先级去重后的 IP 列表。"""
+    merged = []
     seen = set()
     ok_sources = 0
-
-    for src in SOURCES:
+    for src in sources:
         try:
             text = fetch_text(src["url"])
         except Exception as e:  # noqa: BLE001
-            print(f"[跳过] {src['name']}: {type(e).__name__}: {e}")
+            print(f"[跳过][{label}] {src['name']}: {type(e).__name__}: {e}")
             continue
-        ips = extract_ips(text)
+        ips = extract(text, src)
         new = []
         for ip in ips:
             if ip not in seen:  # 同一来源内部和跨来源都去重
@@ -109,23 +137,38 @@ def main() -> int:
                 merged.append(ip)
         if ips:
             ok_sources += 1
-        print(f"[OK] {src['name']}: 抓到 {len(ips)} 个（新增 {len(new)}）")
+        print(f"[OK][{label}] {src['name']}: 抓到 {len(ips)} 个（新增 {len(new)}）")
         time.sleep(1)
+    print(f"[{label}] 合计：{ok_sources}/{len(sources)} 个源可用，去重后 {len(merged)} 个 IP")
+    return merged
 
-    print(f"合计：{ok_sources}/{len(SOURCES)} 个源可用，去重后 {len(merged)} 个 IP")
 
-    if not merged:
-        print("错误：一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
-        return 1
-
+def write_file(path: str, ips, cap: int):
     # 按优先级截断配额，再排序输出（排序是为了让 git diff 稳定，避免无谓提交）
-    final = sorted(merged[:MAX_IPS], key=lambda s: tuple(int(p) for p in s.split(".")))
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+    final = sorted(ips[:cap], key=lambda s: tuple(int(p) for p in s.split(".")))
+    with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(final) + "\n")
+    print(f"已写入 {path}（{len(final)} 个 IP，上限 {cap}）")
 
-    print(f"已写入 {OUTPUT_FILE}（{len(final)} 个 IP，上限 {MAX_IPS}）")
-    return 0
+
+def main() -> int:
+    rc = 0
+
+    official = run_collection(SOURCES, lambda t, s: extract_ips(t), "官方")
+    if official:
+        write_file("ip.txt", official, MAX_IPS)
+    else:
+        print("错误：官方优选一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
+        rc = 1
+
+    proxies = run_collection(
+        PROXY_SOURCES, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), "反代")
+    if proxies:
+        write_file("proxy.txt", proxies, MAX_PROXY_IPS)
+    else:
+        print("[反代] 警告：一个反代 IP 都没抓到，保留旧 proxy.txt（不影响官方域名维护）")
+
+    return rc
 
 
 if __name__ == "__main__":

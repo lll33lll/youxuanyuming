@@ -32,17 +32,23 @@ MANAGED_COMMENT = "managed-by:youxuanyuming"
 MAX_RECORDS = 50  # 每个域名的 A 记录上限
 TIMEOUT = 30
 
-# 域名 -> IP 来源。http(s):// 开头则抓取，否则按本地文件读取（如 ip.txt）
+# 域名 -> 配置。sources 里 http(s):// 开头则抓取，否则按本地文件读取；
+# cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选：IPDB 每小时优选 + 测速 Top10 + 电信优选 + 微测网
-    "cf": [
-        "https://ipdb.api.030101.xyz/?type=bestcf",
-        "https://ip.164746.xyz/ipTop10.html",
-        "https://addressesapi.090227.xyz/ct",
-        "https://www.wetest.vip/page/cloudflare/address_v4.html",
-    ],
-    # 全量：本仓库采集的合并列表（8 个数据源）
-    "cloudflare": ["ip.txt"],
+    # 精选官方：IPDB 每小时优选 + 测速 Top10 + 电信优选 + 微测网
+    "cf": {
+        "sources": [
+            "https://ipdb.api.030101.xyz/?type=bestcf",
+            "https://ip.164746.xyz/ipTop10.html",
+            "https://addressesapi.090227.xyz/ct",
+            "https://www.wetest.vip/page/cloudflare/address_v4.html",
+        ],
+        "cf_only": True,
+    },
+    # 全量官方：本仓库采集的合并列表（8 个数据源）
+    "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
+    # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
+    "proxy": {"sources": ["proxy.txt"], "cf_only": False},
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
@@ -98,15 +104,16 @@ def fetch_text(source: str) -> str:
         return f.read()
 
 
-def extract_ips(text: str):
+def extract_ips(text: str, cf_only: bool = True):
     out = []
     for raw in IP_PATTERN.findall(text):
         try:
             ip = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        if (ip.version == 4 and ip.is_global and raw not in out
-                and any(ip in net for net in _CF_NETS)):
+        if ip.version == 4 and ip.is_global and raw not in out:
+            if cf_only and not any(ip in net for net in _CF_NETS):
+                continue  # 反代/非官方网段的 IP，官方域名不用
             out.append(raw)
     return out
 
@@ -123,7 +130,8 @@ def get_zone_id(zone_name: str) -> str:
     raise CFError(f"zone 名字匹配异常（{names}），请检查 CF_ZONE_NAME")
 
 
-def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources, dry_run: bool):
+def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
+                     dry_run: bool, cf_only: bool = True):
     fqdn = zone_name if subdomain == "@" else f"{subdomain}.{zone_name}"
 
     # 1. 取新 IP 列表（多来源合并去重）
@@ -134,7 +142,7 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources, dry_
         except Exception as e:  # noqa: BLE001
             print(f"[警告] {fqdn}: 来源 {src} 获取失败（{type(e).__name__}: {e}），跳过该来源")
             continue
-        for ip in extract_ips(text):
+        for ip in extract_ips(text, cf_only=cf_only):
             if ip not in desired:
                 desired.append(ip)
     desired = sorted(desired[:MAX_RECORDS], key=lambda s: tuple(int(p) for p in s.split(".")))
@@ -191,8 +199,9 @@ def main() -> int:
 
     try:
         zone_id = get_zone_id(zone_name)
-        for subdomain, sources in SUBDOMAIN_IP_SOURCES.items():
-            update_subdomain(zone_id, zone_name, subdomain, sources, dry_run)
+        for subdomain, cfg in SUBDOMAIN_IP_SOURCES.items():
+            update_subdomain(zone_id, zone_name, subdomain, cfg["sources"], dry_run,
+                             cf_only=cfg.get("cf_only", True))
             time.sleep(0.5)
     except CFError as e:
         print(f"错误：{e}")

@@ -35,16 +35,16 @@ jobs:
       - name: 采集优选IP
         run: python collect_ips.py
 
-      - name: 提交 ip.txt
+      - name: 提交 ip.txt / proxy.txt
         run: |
-          if [ -n "$(git status --porcelain ip.txt)" ]; then
+          if [ -n "$(git status --porcelain ip.txt proxy.txt)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add ip.txt
+            git add ip.txt proxy.txt
             git commit -m "chore: 更新优选IP列表 $(date -u '+%Y-%m-%d %H:%M') UTC"
             git push
           else
-            echo "ip.txt 无变化，跳过提交"
+            echo "ip.txt / proxy.txt 无变化，跳过提交"
           fi
 
       - name: 更新 Cloudflare DNS
