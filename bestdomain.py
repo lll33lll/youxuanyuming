@@ -35,13 +35,13 @@ TIMEOUT = 30
 # 域名 -> IP 来源。http(s):// 开头则抓取，否则按本地文件读取（如 ip.txt）
 SUBDOMAIN_IP_SOURCES = {
     # 精选：测速 Top10 + 电信优选 + 微测网优选
-    "bestcf": [
+    "cf": [
         "https://ip.164746.xyz/ipTop10.html",
         "https://addressesapi.090227.xyz/ct",
         "https://www.wetest.vip/page/cloudflare/address_v4.html",
     ],
     # 全量：本仓库采集的合并列表
-    "api": ["ip.txt"],
+    "cloudflare": ["ip.txt"],
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")

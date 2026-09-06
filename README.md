@@ -12,8 +12,8 @@ GitHub Actions **每 3 小时**自动：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `bestcf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 精选，数量少质量高 |
-| `api.223226.xyz` | 本仓库 `ip.txt`（全部数据源合并） | 全量，上限 50 个 |
+| `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 精选，数量少质量高 |
+| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部数据源合并） | 全量，上限 50 个 |
 
 > 为什么是灰云：优选域名的用法是客户端里「地址」填它（拿到一批好 IP），「SNI/Host」填你真正走 CF 代理的域名（如 Worker/Pages 域名）。如果开橙云，解析出来就又变回 CF 随机分配的 IP，失去优选意义。
 
@@ -42,8 +42,8 @@ Fork 的 Actions 默认禁用。打开仓库 **Actions** 标签页，点绿色�
 ## 验证
 
 ```bash
-nslookup bestcf.223226.xyz
-nslookup api.223226.xyz
+nslookup cf.223226.xyz
+nslookup cloudflare.223226.xyz
 ```
 
 能解析出一批 104.x / 162.159.x / 172.64.x 的地址就是正常的。
@@ -52,7 +52,7 @@ nslookup api.223226.xyz
 
 在代理客户端（v2rayN / Clash Meta / Shadowrocket / sing-box 等）里：
 
-- **address / server** 填 `bestcf.223226.xyz` 或 `api.223226.xyz`
+- **address / server** 填 `cf.223226.xyz` 或 `cloudflare.223226.xyz`
 - **SNI / Host / peer** 填你真正走 CF 的域名（例如你自己的 Worker、Pages 或其它橙云域名）
 
 ## 手动运行 / 试运行
@@ -68,7 +68,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；两个域名各自的有效 IP 少于 2 个时会跳过更新、保留现有记录，不会清空。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
-- **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `api` 域名的数据源，可以通过
+- **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
   `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
 
 ## 相对上游的改动
