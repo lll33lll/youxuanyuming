@@ -1,0 +1,83 @@
+name: 更新优选 IP 和 Cloudflare DNS
+
+on:
+  # GitHub Actions 的 cron 使用 UTC；*/3 表示每 3 小时运行一次。
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只抓取并检查，不修改 Cloudflare DNS"
+        required: false
+        default: false
+        type: boolean
+  # 修改脚本后自动进行一次校验；ip.txt 的自动提交不会匹配这些路径，
+  # 因此不会因为提交产物而无限循环。
+  push:
+    branches: [main]
+    paths:
+      - "collect_ips.py"
+      - "bestdomain.py"
+      - "ip_utils.py"
+      - "config.json"
+      - ".github/workflows/update.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: youxuanyuming-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    env:
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      MAX_RECORDS: "20"
+      MAX_DNS_RECORDS: "20"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Collect public IPv4 addresses
+        run: python collect_ips.py
+
+      - name: Show generated list
+        run: |
+          echo "ip.txt lines: $(wc -l < ip.txt)"
+          sed -n '1,20p' ip.txt
+
+      - name: Commit updated ip.txt
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "dry_run=true，跳过提交 ip.txt"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ip.txt
+          if git diff --cached --quiet; then
+            echo "ip.txt 没有变化"
+          else
+            git commit -m "chore: update Cloudflare IPv4 list"
+            git push
+          fi
+
+      - name: Update Cloudflare DNS
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          if [ -z "$CF_API_TOKEN" ]; then
+            echo "::error::未配置 CF_API_TOKEN。请先在 Settings → Secrets and variables → Actions 中添加同名 Secret。"
+            exit 1
+          fi
+          python bestdomain.py
