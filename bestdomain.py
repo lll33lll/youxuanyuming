@@ -45,7 +45,7 @@ SUBDOMAIN_IP_SOURCES = {
         ],
         "cf_only": True,
     },
-    # 全量官方：本仓库采集的合并列表（8 个数据源）
+    # 全量官方：本仓库采集的合并列表（15 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
     # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
     "proxy": {"sources": ["proxy.txt"], "cf_only": False},
@@ -63,6 +63,10 @@ CF_V4_RANGES = [
     "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
 ]
 _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
+
+# WARP 专用网段（WARP/MASQUE 端点不服务普通 SNI 代理，不能当优选 IP 用）
+WARP_V4_RANGES = ["162.159.192.0/21"]
+_WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 
 
 class CFError(Exception):
@@ -112,6 +116,8 @@ def extract_ips(text: str, cf_only: bool = True):
         except ValueError:
             continue
         if ip.version == 4 and ip.is_global and raw not in out:
+            if any(ip in net for net in _WARP_NETS):
+                continue  # WARP 专用端点，不能当优选 IP
             if cf_only and not any(ip in net for net in _CF_NETS):
                 continue  # 反代/非官方网段的 IP，官方域名不用
             out.append(raw)
