@@ -58,7 +58,7 @@ _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
 
 # 输出上限
 MAX_IPS = 50        # ip.txt（官方优选）
-MAX_PROXY_IPS = 30  # proxy.txt（反代，取质量优先的前 30 个）
+MAX_PROXY_IPS = 50  # proxy.txt（反代，取质量优先的前 50 个）
 TIMEOUT = 20
 RETRIES = 2
 

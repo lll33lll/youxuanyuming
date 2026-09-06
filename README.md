@@ -14,7 +14,7 @@ GitHub Actions **每 3 小时**自动：
 | --- | --- | --- |
 | `cf.223226.xyz` | [IPDB bestcf](https://ipdb.api.030101.xyz/?type=bestcf) + [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 8 个官方源合并） | 官方网段·全量，上限 50 个 |
-| `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 高速优选 + [LancelotRar](https://github.com/LancelotRar/best-cf-ips) bestips，只取 443 端口） | **第三方反代节点**，上限 30 个 |
+| `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 高速优选 + [LancelotRar](https://github.com/LancelotRar/best-cf-ips) bestips，只取 443 端口） | **第三方反代节点**，上限 50 个 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
