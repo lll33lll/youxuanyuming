@@ -1,77 +1,86 @@
-# 223226.xyz 优选 IP / DNS 自动更新
+# youxuanyuming — Cloudflare 优选域名自动维护
 
-这是基于 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming) 整理的个人版本：
+Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游：[tianshipapa](https://github.com/tianshipapa) / [ymyuuu/BestDomain](https://github.com/ymyuuu/BestDomain)），本 fork 修复了上游的一系列问题（见下方「相对上游的改动」），并改造成零依赖、可长期稳定运行的版本。
 
-1. 从公开页面收集 Cloudflare 公网 IPv4；
-2. 保存到 [`ip.txt`](./ip.txt)；
-3. 自动维护下面两个 DNS-only（灰云）记录：
+## 它做什么
 
-- **bestcf.223226.xyz**：优先使用 `ip.164746.xyz` 的小列表；来源不可用时回退到本仓库的 `ip.txt`。
-- **api.223226.xyz**：使用本次收集到的 `ip.txt`。
+GitHub Actions **每 3 小时**自动：
 
-> 优选 IP 只是候选地址，不保证长期可用、速度或连通性；请遵守目标网络、服务商和 Cloudflare 的相关条款。本项目不会替代正常的源站安全配置。
+1. 从多个公开的 Cloudflare 优选 IP 数据源抓取 IPv4（坏源自动跳过）
+2. 去重、校验、限量后写入 `ip.txt` 并提交到仓库
+3. 调 Cloudflare API，把下面两个域名的 A 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
-## 首次配置
+| 域名 | IP 来源 | 说明 |
+| --- | --- | --- |
+| `bestcf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 精选，数量少质量高 |
+| `api.223226.xyz` | 本仓库 `ip.txt`（全部数据源合并） | 全量，上限 50 个 |
 
-### 1. 添加 GitHub Actions Secret
+> 为什么是灰云：优选域名的用法是客户端里「地址」填它（拿到一批好 IP），「SNI/Host」填你真正走 CF 代理的域名（如 Worker/Pages 域名）。如果开橙云，解析出来就又变回 CF 随机分配的 IP，失去优选意义。
 
-在本仓库打开 **Settings → Secrets and variables → Actions → New repository secret**，添加：
+## 一次性配置（3 步）
 
-- 名称：`CF_API_TOKEN`
-- 值：Cloudflare API Token（不要使用 Global API Key）
+### 1. 启用 Actions
 
-建议 Token 权限最小化为：
+Fork 的 Actions 默认禁用。打开仓库 **Actions** 标签页，点绿色按钮 **"I understand my workflows, go ahead and enable them"**。
 
-- **Zone → DNS → Edit**
-- Zone Resources 只选择 `223226.xyz`
+### 2. 创建 Cloudflare API 令牌
 
-如果仓库的 Actions 尚未启用，请先在 **Actions** 页面点击启用。
+1. 打开 https://dash.cloudflare.com/profile/api-tokens → **Create Token**
+2. 选 **Edit zone DNS** 模板
+3. Zone Resources 里**只勾 `223226.xyz`** 这一个域名（不要给所有域名）
+4. 创建后复制令牌（只显示一次）
 
-### 2. 手动运行
+### 3. 添加仓库 Secret
 
-进入 **Actions → 更新优选 IP 和 Cloudflare DNS → Run workflow**。首次可以勾选 `dry_run` 检查抓取结果；确认无误后再正常运行。
+仓库 **Settings → Secrets and variables → Actions → New repository secret**：
 
-工作流也会按 UTC 每 3 小时运行一次。GitHub Actions 的定时任务可能有延迟，不能当作精确计时器。
+- Name: `CF_API_TOKEN`
+- Secret: 上一步复制的令牌
 
-## 配置
+没配令牌之前，采集和 `ip.txt` 提交照常运行，只是 DNS 不更新；配置好后的下一个周期自动生效。
 
-默认配置在 [`config.json`](./config.json)：
-
-- `zone_name`：Cloudflare Zone，当前为 `223226.xyz`；
-- `max_records`：每个主机名最多保留的 A 记录数，当前为 20；
-- `ip_sources`：收集 IP 的来源列表。
-
-也可以通过 Actions 环境变量覆盖：
-
-- `IP_SOURCES`：逗号分隔的来源 URL；
-- `MAX_RECORDS`：写入 `ip.txt` 的最大地址数；
-- `BESTCF_SOURCE_URL`：`bestcf` 的优先来源；
-- `BESTCF_HOST` / `API_HOST`：两个子域名单标签；
-- `MAX_DNS_RECORDS`：每个主机名写入 Cloudflare 的最大 A 记录数。
-
-## 安全行为
-
-- 只接受经过 `ipaddress` 校验的公网 IPv4，自动去重；
-- 所有来源都失败或没有有效 IP 时，保留旧的 `ip.txt`，不继续更新 DNS；
-- DNS 记录带有 `managed-by=youxuanyuming` 标记；未标记的现有 A 记录不会被脚本删除，会直接报错等待人工确认；
-- 写 DNS 后会重新读取 Cloudflare API 校验最终记录集合；
-- 自动提交 `ip.txt` 不会再次触发本工作流，避免循环。
-
-## 本地运行
-
-本项目只使用 Python 标准库，不需要安装第三方包：
+## 验证
 
 ```bash
-python collect_ips.py
-CF_API_TOKEN='你的令牌' python bestdomain.py
+nslookup bestcf.223226.xyz
+nslookup api.223226.xyz
 ```
 
-本地运行前请确认令牌只保存在环境变量或密码管理器中，绝不要提交到 Git。
+能解析出一批 104.x / 162.159.x / 172.64.x 的地址就是正常的。
 
-## 文件说明
+## 怎么用
 
-- `collect_ips.py`：抓取并生成 IP 列表；
-- `bestdomain.py`：安全同步 Cloudflare DNS；
-- `ip_utils.py`：IP 校验与提取共用函数；
-- `.github/workflows/update.yml`：定时/手动工作流；
-- `config.json`：非敏感项目配置。
+在代理客户端（v2rayN / Clash Meta / Shadowrocket / sing-box 等）里：
+
+- **address / server** 填 `bestcf.223226.xyz` 或 `api.223226.xyz`
+- **SNI / Host / peer** 填你真正走 CF 的域名（例如你自己的 Worker、Pages 或其它橙云域名）
+
+## 手动运行 / 试运行
+
+Actions → **采集优选IP并更新DNS** → **Run workflow**：
+
+- 直接运行 = 立即采集并更新 DNS
+- 勾选 **dry_run** = 只打印将要增删的记录，不实际改动
+
+## 常见问题
+
+- **多久更新一次？** 每 3 小时（UTC `17 */3 * * *`）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
+- **数据源挂了怎么办？** 单个源挂了自动跳过；两个域名各自的有效 IP 少于 2 个时会跳过更新、保留现有记录，不会清空。
+- **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
+- **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `api` 域名的数据源，可以通过
+  `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
+
+## 相对上游的改动
+
+- 上游 `bestcf` 的数据源 `ipdb.030101.xyz/api/bestcf.txt` 已失效（返回 HTML 页面），`stock.hostmonit.com/CloudFlareYes` 改版抓不到 IP —— 已换成当前可用数据源
+- 上游取 `zones[0]` 会更新到账号里第一个域名 —— 改为按 `CF_ZONE_NAME` 精确匹配
+- 上游先删后建且无保护，数据源返回空时会清空 DNS —— 改为先建后删、IP 数量 <2 跳过、只管理带注释的自己的记录
+- 增加每域名记录数上限（50）与 `ip.txt` 上限（50），防止异常源撑爆 zone
+- 去掉 `requests` / `beautifulsoup4` 依赖，只用标准库，CI 更快更稳
+- 两个 workflow（采集/DNS）合并为一个，消除时序依赖；频率从每 30 分钟放宽到每 3 小时
+- 采集脚本对无效/保留 IP 做了 `ipaddress` 校验，避免把网页里的版本号等杂质抓进来
+
+## 开源协议
+
+沿用上游：欢迎使用、修改和传播。免责声明：脚本尽力确保安全，但任何使用问题请自负风险。

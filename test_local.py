@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""本地单测：不碰真实 API，用假 cf() 验证 bestdomain.py 的核心逻辑。
+
+运行：python3 test_local.py（需要仓库根目录有 ip.txt）
+"""
+import sys
+import bestdomain
+
+PASS = 0
+FAIL = 0
+
+
+def check(name, cond, extra=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        print(f"  PASS  {name}")
+    else:
+        FAIL += 1
+        print(f"  FAIL  {name}  {extra}")
+
+
+def run_case(existing_records, sources=None, dry_run=False):
+    """existing_records: [{'id','content','comment'}]"""
+    calls = []
+    zone_id = "z0"
+
+    def fake_cf(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET" and path.startswith(f"/zones/{zone_id}/dns_records"):
+            return existing_records
+        if method == "GET" and path.startswith("/zones?"):
+            return [{"id": zone_id, "name": "223226.xyz"}]
+        return {"id": "new"}
+
+    bestdomain.cf = fake_cf
+    srcs = sources if sources is not None else ["ip.txt"]
+    bestdomain.update_subdomain(zone_id, "223226.xyz", "test", srcs, dry_run)
+    return calls
+
+
+print("== 场景1：全新域名，应只新增不删除 ==")
+calls = run_case(existing_records=[])
+posts = [c for c in calls if c[0] == "POST"]
+dels = [c for c in calls if c[0] == "DELETE"]
+check("有新增", len(posts) > 0, f"posts={len(posts)}")
+check("无删除", len(dels) == 0)
+check("带管理注释", all(c[2].get("comment") == bestdomain.MANAGED_COMMENT for c in posts))
+check("灰云+ttl1", all(c[2].get("proxied") is False and c[2].get("ttl") == 1 for c in posts))
+check("不超上限", len(posts) <= bestdomain.MAX_RECORDS)
+
+print("== 场景2：已有托管记录，部分过期，应先加后删 ==")
+old_ips = [line.strip() for line in open("ip.txt")][:5]
+existing = [{"id": f"r{i}", "content": ip, "comment": bestdomain.MANAGED_COMMENT} for i, ip in enumerate(old_ips)]
+existing.append({"id": "stale", "content": "1.2.3.4", "comment": bestdomain.MANAGED_COMMENT})
+calls = run_case(existing_records=existing)
+deleted = [c for c in calls if c[0] == "DELETE"]
+check("删除了过期记录 1.2.3.4", any(c[1].endswith("/stale") for c in deleted))
+check("先加后删", [c[0] for c in calls if c[0] in ("POST", "DELETE")].count("DELETE") == 1)
+check("已存在的IP不重复加", not any(c[2]["content"] in old_ips for c in calls if c[0] == "POST"))
+
+print("== 场景3：用户手工加的记录（无注释）绝不能被删 ==")
+existing = [{"id": "manual", "content": "9.9.9.9", "comment": None}]
+calls = run_case(existing_records=existing)
+check("不删手工记录", not any(c[1].endswith("/manual") for c in calls if c[0] == "DELETE"))
+check("同IP已存在不再加", not any(c[0] == "POST" and c[2]["content"] == "9.9.9.9" for c in calls))
+
+print("== 场景4：来源几乎全挂（<2 个IP），应跳过不动 ==")
+calls = run_case(existing_records=[], sources=["nosuchfile.txt"])
+check("无任何写操作", not any(c[0] in ("POST", "DELETE") for c in calls))
+
+print("== 场景5：dry-run 只打印不写 ==")
+existing = [{"id": "stale", "content": "1.2.3.4", "comment": bestdomain.MANAGED_COMMENT}]
+calls = run_case(existing_records=existing, dry_run=True)
+check("无任何写操作", not any(c[0] in ("POST", "DELETE") for c in calls))
+
+print(f"\n结果：{PASS} 通过，{FAIL} 失败")
+sys.exit(1 if FAIL else 0)

@@ -1,345 +1,193 @@
 #!/usr/bin/env python3
-"""Synchronize the collected IPs to Cloudflare DNS records.
-
-Only records created by this project are changed. Existing unmarked A records
-are deliberately rejected instead of being silently deleted.
+# -*- coding: utf-8 -*-
 """
+从 IP 列表更新 Cloudflare DNS 的 A 记录（优选域名）。
 
-from __future__ import annotations
+用法（在仓库根目录）：
+    CF_API_TOKEN=xxx CF_ZONE_NAME=223226.xyz python bestdomain.py [--dry-run]
 
+安全设计：
+- 只管理自己创建的记录（按 DNS 记录 comment 识别），不会动你手工加的记录
+- 新列表少于 2 个 IP 时直接跳过该域名（数据源抽风也不会把你现有记录清空）
+- 每个域名的记录数量有上限，超出截断
+- 支持 --dry-run 只打印计划不实际改动
+
+环境变量：
+- CF_API_TOKEN  必填：Cloudflare API 令牌（Zone.DNS Edit 权限）
+- CF_ZONE_NAME  选填：目标域名（默认 223226.xyz），按名字精确匹配，不会再用错 zone
+- DRY_RUN=1     等同 --dry-run
+"""
+import ipaddress
 import json
 import os
+import re
 import sys
 import time
-from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+import urllib.error
+import urllib.parse
+import urllib.request
 
-from ip_utils import extract_public_ipv4, unique_ips
+API_BASE = "https://api.cloudflare.com/client/v4"
+MANAGED_COMMENT = "managed-by:youxuanyuming"
+MAX_RECORDS = 50  # 每个域名的 A 记录上限
+TIMEOUT = 30
+
+# 域名 -> IP 来源。http(s):// 开头则抓取，否则按本地文件读取（如 ip.txt）
+SUBDOMAIN_IP_SOURCES = {
+    # 精选：测速 Top10 + 电信优选 + 微测网优选
+    "bestcf": [
+        "https://ip.164746.xyz/ipTop10.html",
+        "https://addressesapi.090227.xyz/ct",
+        "https://www.wetest.vip/page/cloudflare/address_v4.html",
+    ],
+    # 全量：本仓库采集的合并列表
+    "api": ["ip.txt"],
+}
+
+IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+HEADERS = {"User-Agent": "youxuanyuming/2.0"}
 
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_FILE = ROOT / "config.json"
-IP_FILE = ROOT / "ip.txt"
-CF_API = "https://api.cloudflare.com/client/v4"
-USER_AGENT = "youxuanyuming/1.0 (+https://github.com/lll33lll/youxuanyuming)"
-MANAGED_COMMENT = "managed-by=youxuanyuming"
-DEFAULT_BESTCF_SOURCE = "https://ip.164746.xyz/ipTop10.html"
+class CFError(Exception):
+    pass
 
 
-class CloudflareError(RuntimeError):
-    """An actionable Cloudflare API error."""
-
-
-def as_bool(value: str) -> bool:
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def load_config() -> Dict:
+def cf(method: str, path: str, body=None):
+    """调用 Cloudflare API，失败抛 CFError。"""
+    url = API_BASE + path
+    headers = dict(HEADERS)
+    headers["Authorization"] = "Bearer " + os.environ["CF_API_TOKEN"]
+    data = None
+    if body is not None:
+        data = json.dumps(body).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with CONFIG_FILE.open(encoding="utf-8") as file:
-            return json.load(file)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"无法读取 {CONFIG_FILE.name}: {exc}") from exc
-
-
-def decode_response(raw: bytes, headers) -> str:
-    charset = headers.get_content_charset() if headers else None
-    return raw.decode(charset or "utf-8", errors="replace")
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:500]
+        raise CFError(f"HTTP {e.code} {method} {path}: {detail}") from e
+    except Exception as e:  # noqa: BLE001
+        raise CFError(f"{type(e).__name__} {method} {path}: {e}") from e
+    if not payload.get("success"):
+        raise CFError(f"API 失败 {method} {path}: {json.dumps(payload.get('errors', []))[:500]}")
+    return payload.get("result")
 
 
 def fetch_text(source: str) -> str:
-    """Fetch a source URL with bounded retries, or read a local file."""
+    if source.startswith("http://") or source.startswith("https://"):
+        req = urllib.request.Request(source, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+        })
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return resp.read().decode("utf-8", "replace")
+    with open(source, "r", encoding="utf-8") as f:
+        return f.read()
 
-    if source.startswith("file://"):
-        value = source[len("file://") :]
-        path = Path(value)
-        if not path.is_absolute():
-            path = ROOT / path
+
+def extract_ips(text: str):
+    out = []
+    for raw in IP_PATTERN.findall(text):
         try:
-            return path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise RuntimeError(f"无法读取本地来源 {path}: {exc}") from exc
+            ip = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if ip.version == 4 and ip.is_global and raw not in out:
+            out.append(raw)
+    return out
 
-    last_error = "unknown error"
-    for attempt in range(1, 4):
+
+def get_zone_id(zone_name: str) -> str:
+    q = urllib.parse.urlencode({"name": zone_name, "status": "active", "per_page": 50})
+    zones = cf("GET", f"/zones?{q}")
+    if len(zones) == 1:
+        print(f"[zone] {zones[0]['name']} ({zones[0]['id']})")
+        return zones[0]["id"]
+    if not zones:
+        raise CFError(f"账号里找不到名为 {zone_name} 的活跃 zone，请检查 CF_ZONE_NAME")
+    names = ", ".join(z["name"] for z in zones)
+    raise CFError(f"zone 名字匹配异常（{names}），请检查 CF_ZONE_NAME")
+
+
+def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources, dry_run: bool):
+    fqdn = zone_name if subdomain == "@" else f"{subdomain}.{zone_name}"
+
+    # 1. 取新 IP 列表（多来源合并去重）
+    desired = []
+    for src in sources:
         try:
-            request = Request(
-                source,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,text/plain;q=0.9,*/*;q=0.8",
-                },
-            )
-            with urlopen(request, timeout=30) as response:
-                return decode_response(response.read(), response.headers)
-        except (OSError, URLError) as exc:
-            last_error = str(exc)
-            if attempt < 3:
-                time.sleep(attempt)
-    raise RuntimeError(f"来源请求失败 {source}: {last_error}")
+            text = fetch_text(src)
+        except Exception as e:  # noqa: BLE001
+            print(f"[警告] {fqdn}: 来源 {src} 获取失败（{type(e).__name__}: {e}），跳过该来源")
+            continue
+        for ip in extract_ips(text):
+            if ip not in desired:
+                desired.append(ip)
+    desired = sorted(desired[:MAX_RECORDS], key=lambda s: tuple(int(p) for p in s.split(".")))
 
-
-def api_call(
-    token: str,
-    method: str,
-    path: str,
-    params: Dict | None = None,
-    body: Dict | None = None,
-) -> Dict:
-    """Call Cloudflare's API and fail on both HTTP and API-level errors."""
-
-    url = f"{CF_API}{path}"
-    if params:
-        url += "?" + urlencode(params)
-    encoded_body = json.dumps(body).encode("utf-8") if body is not None else None
-    request = Request(
-        url,
-        data=encoded_body,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": USER_AGENT,
-        },
-    )
-
-    try:
-        with urlopen(request, timeout=30) as response:
-            status = response.status
-            raw = response.read()
-            headers = response.headers
-    except HTTPError as exc:
-        status = exc.code
-        raw = exc.read()
-        headers = exc.headers
-    except (OSError, URLError) as exc:
-        raise CloudflareError(f"请求 Cloudflare 失败: {exc}") from exc
-
-    try:
-        payload = json.loads(decode_response(raw, headers))
-    except (TypeError, ValueError) as exc:
-        raise CloudflareError(f"Cloudflare 返回了非 JSON 响应（HTTP {status}）") from exc
-
-    if not (200 <= status < 300) or not payload.get("success"):
-        errors = payload.get("errors") or []
-        detail = "; ".join(str(item.get("message", item)) for item in errors)
-        raise CloudflareError(f"Cloudflare API 错误（HTTP {status}）: {detail or payload}")
-    return payload
-
-
-def exact_zone(token: str, requested: str) -> Dict:
-    normalized = requested.strip().lower().rstrip(".")
-    payload = api_call(
-        token,
-        "GET",
-        "/zones",
-        params={"name": normalized, "status": "active", "per_page": 50},
-    )
-    matches = [
-        zone
-        for zone in payload.get("result", [])
-        if str(zone.get("name", "")).lower().rstrip(".") == normalized
-    ]
-    if len(matches) != 1:
-        raise CloudflareError(f"找不到唯一的 active zone: {requested!r}")
-    return matches[0]
-
-
-def record_name(host: str, zone_name: str) -> str:
-    host = host.strip().lower().rstrip(".")
-    zone_name = zone_name.strip().lower().rstrip(".")
-    if not host or host == "@":
-        return zone_name
-    if "." in host or any(not (char.isalnum() or char == "-") for char in host):
-        raise RuntimeError(f"主机名只允许单个标签: {host!r}")
-    return f"{host}.{zone_name}"
-
-
-def list_records(token: str, zone_id: str, name: str) -> List[Dict]:
-    payload = api_call(
-        token,
-        "GET",
-        f"/zones/{zone_id}/dns_records",
-        params={"name.exact": name, "per_page": 100, "page": 1},
-    )
-    return payload.get("result", [])
-
-
-def ips_from_source(source: str) -> List[str]:
-    text = fetch_text(source)
-    if source.startswith("file://"):
-        # Supporting one address per line also makes a manually supplied file
-        # useful when an upstream web page is temporarily unavailable.
-        found = unique_ips(text.splitlines())
-    else:
-        found = extract_public_ipv4(text)
-    if not found:
-        raise RuntimeError(f"来源没有找到公共 IPv4: {source}")
-    return found
-
-
-def choose_bestcf_ips(sources: Iterable[str]) -> Tuple[List[str], str]:
-    errors: List[str] = []
-    for source in sources:
-        try:
-            addresses = ips_from_source(source)
-            return addresses, source
-        except Exception as exc:
-            errors.append(f"{source}: {exc}")
-    raise RuntimeError("bestcf 的所有来源都不可用: " + " | ".join(errors))
-
-
-def managed(record: Dict) -> bool:
-    tags = record.get("tags") or []
-    return record.get("comment") == MANAGED_COMMENT or MANAGED_COMMENT in tags
-
-
-def sync_one(
-    token: str,
-    zone_id: str,
-    name: str,
-    addresses: List[str],
-    dry_run: bool,
-) -> None:
-    desired = unique_ips(addresses)
-    if not desired:
-        raise RuntimeError(f"{name} 没有可用的公共 IPv4，拒绝修改 DNS")
-
-    records = list_records(token, zone_id, name)
-    cname_records = [record for record in records if record.get("type") == "CNAME"]
-    if cname_records:
-        raise RuntimeError(f"{name} 已存在 CNAME，不能同时创建 A 记录；请先人工处理")
-
-    a_records = [record for record in records if record.get("type") == "A"]
-    unmanaged_records = [record for record in a_records if not managed(record)]
-    if unmanaged_records:
-        ids = ", ".join(str(record.get("id")) for record in unmanaged_records)
-        raise RuntimeError(
-            f"{name} 存在未由本项目管理的 A 记录（{ids}），为避免误删已停止；"
-            "请确认后手动删除，或给它们加上本项目管理标记"
-        )
-
-    current = [record.get("content") for record in a_records]
-    print(f"[dns] {name}: current={current}, desired={desired}")
-    if dry_run:
+    if len(desired) < 2:
+        print(f"[跳过] {fqdn}: 有效 IP 只有 {len(desired)} 个(<2)，为防误清空保留现有记录")
         return
 
-    kept: List[str] = []
-    for record in a_records:
-        content = record.get("content")
-        if content in desired and content not in kept:
-            kept.append(content)
-            if record.get("proxied") is not False or record.get("ttl") != 60:
-                api_call(
-                    token,
-                    "PATCH",
-                    f"/zones/{zone_id}/dns_records/{record['id']}",
-                    body={"ttl": 60, "proxied": False, "comment": MANAGED_COMMENT},
-                )
-                print(f"[dns] normalized {record['id']} ({content})")
-            continue
-        api_call(token, "DELETE", f"/zones/{zone_id}/dns_records/{record['id']}")
-        print(f"[dns] deleted {record['id']} ({content})")
+    # 2. 查现有 A 记录（区分“本脚本管理的”和“用户手工加的”）
+    q = urllib.parse.urlencode({"type": "A", "name": fqdn, "per_page": 100})
+    existing = cf("GET", f"/zones/{zone_id}/dns_records?{q}")
+    managed = [r for r in existing if r.get("comment") == MANAGED_COMMENT]
+    existing_contents = {r["content"] for r in existing}
 
-    for content in desired:
-        if content in kept:
-            continue
-        payload = {
-            "type": "A",
-            "name": name,
-            "content": content,
-            "ttl": 60,
-            "proxied": False,
-            "comment": MANAGED_COMMENT,
-        }
-        api_call(token, "POST", f"/zones/{zone_id}/dns_records", body=payload)
-        print(f"[dns] added {name} -> {content}")
+    to_delete = [r for r in managed if r["content"] not in desired]
+    to_add = [ip for ip in desired if ip not in existing_contents]
 
-    # Verify the postcondition instead of assuming that every API call worked.
-    verified = list_records(token, zone_id, name)
-    verified_contents = sorted(
-        record.get("content") for record in verified if record.get("type") == "A" and managed(record)
-    )
-    if verified_contents != sorted(desired):
-        raise CloudflareError(
-            f"{name} 校验失败: expected={sorted(desired)}, actual={verified_contents}"
-        )
+    print(f"[{fqdn}] 目标 {len(desired)} 个 IP | 现有 {len(existing)} 条"
+          f"（托管 {len(managed)}）| 需删 {len(to_delete)} | 需加 {len(to_add)}")
+    if not to_delete and not to_add:
+        print(f"[{fqdn}] 无变化")
+        return
+
+    if dry_run:
+        for r in to_delete:
+            print(f"  将删除: {r['content']}")
+        for ip in to_add:
+            print(f"  将新增: {ip}")
+        print(f"[{fqdn}] dry-run 模式，未实际改动")
+        return
+
+    # 3. 先加后删（保证任意时刻域名都有记录可解析）
+    for ip in to_add:
+        cf("POST", f"/zones/{zone_id}/dns_records", {
+            "type": "A", "name": fqdn, "content": ip,
+            "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
+        })
+        print(f"  已新增: {ip}")
+    for r in to_delete:
+        cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
+        print(f"  已删除: {r['content']}")
+        time.sleep(0.2)
 
 
 def main() -> int:
-    token = os.getenv("CF_API_TOKEN", "").strip()
-    if not token:
-        raise RuntimeError("缺少 CF_API_TOKEN；请放在 GitHub Actions Secret，不要写进代码")
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    dry_run = "--dry-run" in sys.argv or os.environ.get("DRY_RUN") == "1"
 
-    config = load_config()
-    zone_name = os.getenv("CF_ZONE_NAME", str(config.get("zone_name", ""))).strip()
-    if not zone_name:
-        raise RuntimeError("缺少 CF_ZONE_NAME")
+    token = os.environ.get("CF_API_TOKEN", "").strip()
+    if not token:
+        print("错误：未设置 CF_API_TOKEN 环境变量（需要 Zone.DNS Edit 权限的令牌）")
+        return 1
+    zone_name = os.environ.get("CF_ZONE_NAME", "223226.xyz").strip().rstrip(".")
 
     try:
-        max_records = int(os.getenv("MAX_DNS_RECORDS", str(config.get("max_records", 20))))
-    except ValueError as exc:
-        raise RuntimeError("MAX_DNS_RECORDS 必须是整数") from exc
-    if max_records < 1:
-        raise RuntimeError("MAX_DNS_RECORDS 必须大于 0")
-
-    configured_hosts = config.get("hosts", ["bestcf", "api"])
-    if not isinstance(configured_hosts, list) or len(configured_hosts) < 2:
-        raise RuntimeError("config.json 的 hosts 至少要有 bestcf 和 api 两个主机名")
-    bestcf_host = os.getenv("BESTCF_HOST", str(configured_hosts[0])).strip()
-    api_host = os.getenv("API_HOST", str(configured_hosts[1])).strip()
-
-    zone_id = os.getenv("CF_ZONE_ID", str(config.get("zone_id", ""))).strip()
-    if zone_id:
-        # The ID is pinned in config.json so a token covering multiple zones
-        # can never update the wrong one.
-        canonical_zone = zone_name.rstrip(".")
-    else:
-        zone = exact_zone(token, zone_name)
-        zone_id = zone["id"]
-        canonical_zone = zone["name"]
-
-    configured_sources = config.get("ip_sources", [])
-    default_source = configured_sources[0] if configured_sources else DEFAULT_BESTCF_SOURCE
-    bestcf_source = os.getenv("BESTCF_SOURCE_URL", str(default_source)).strip()
-    # If the external top-list page is down or changes format, the freshly
-    # collected local list is a safe fallback and prevents blanking DNS.
-    bestcf_sources = [bestcf_source]
-    if "file://ip.txt" not in bestcf_sources:
-        bestcf_sources.append("file://ip.txt")
-
-    bestcf_ips, selected_source = choose_bestcf_ips(bestcf_sources)
-    api_ips = ips_from_source("file://ip.txt")
-    bestcf_ips = bestcf_ips[:max_records]
-    api_ips = api_ips[:max_records]
-    print(f"[dns] zone={canonical_zone} ({zone_id})")
-    print(f"[dns] bestcf source={selected_source}")
-
-    dry_run = as_bool(os.getenv("DRY_RUN", "false"))
-    sync_one(
-        token,
-        zone_id,
-        record_name(bestcf_host, canonical_zone),
-        bestcf_ips,
-        dry_run,
-    )
-    sync_one(
-        token,
-        zone_id,
-        record_name(api_host, canonical_zone),
-        api_ips,
-        dry_run,
-    )
-    print("[dns] done")
+        zone_id = get_zone_id(zone_name)
+        for subdomain, sources in SUBDOMAIN_IP_SOURCES.items():
+            update_subdomain(zone_id, zone_name, subdomain, sources, dry_run)
+            time.sleep(0.5)
+    except CFError as e:
+        print(f"错误：{e}")
+        return 1
+    print("完成" + ("（dry-run，未改动）" if dry_run else ""))
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except Exception as exc:
-        print(f"[dns] ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+    sys.exit(main())

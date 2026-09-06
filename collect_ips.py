@@ -1,127 +1,110 @@
 #!/usr/bin/env python3
-"""Collect public Cloudflare IPv4 addresses into ``ip.txt``.
-
-The upstream project scraped several pages with page-specific HTML selectors.
-Those selectors broke whenever a page layout changed. This version only
-extracts and validates IPv4 candidates, so it works for both plain-text and
-HTML sources and has no third-party runtime dependency.
+# -*- coding: utf-8 -*-
 """
+采集 Cloudflare 优选 IPv4，写入 ip.txt（去重、校验、限量）。
 
-from __future__ import annotations
-
-import json
+特点：
+- 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
+- 单个数据源挂了自动跳过，全部挂掉则报错退出且不动旧 ip.txt
+- 只保留公网 IPv4，自动剔除内网/保留地址，避免把网页里的版本号等误当代码抓进来
+"""
+import ipaddress
 import os
+import re
 import sys
 import time
-from pathlib import Path
-from typing import Dict, Iterable, List
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+import urllib.request
 
-from ip_utils import extract_public_ipv4
+# 数据源（按优先级排序，越靠前质量越高；抓不满配额时优先用靠前的）
+SOURCES = [
+    # 每 10 分钟测速的 Top 优选（纯文本，逗号分隔）
+    {"name": "ip.164746.xyz Top10", "url": "https://ip.164746.xyz/ipTop10.html"},
+    # CloudFlareYes 电信优选（纯文本）
+    {"name": "addressesapi.090227.xyz/ct", "url": "https://addressesapi.090227.xyz/ct"},
+    # 麒麟域名检测优选（HTML，用正则提取）
+    {"name": "api.uouin.com", "url": "https://api.uouin.com/cloudflare.html"},
+    # 微测网优选 IPv4（HTML 表格）
+    {"name": "wetest.vip", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
+]
 
+# ip.txt 最多保留多少个 IP（防止数据源异常返回海量地址，撑爆 DNS 记录）
+MAX_IPS = 50
+OUTPUT_FILE = "ip.txt"
+TIMEOUT = 20
+RETRIES = 2
 
-ROOT = Path(__file__).resolve().parent
-CONFIG_FILE = ROOT / "config.json"
-OUTPUT_FILE = ROOT / "ip.txt"
-USER_AGENT = "youxuanyuming/1.0 (+https://github.com/lll33lll/youxuanyuming)"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+}
 
-
-def load_config() -> Dict:
-    try:
-        with CONFIG_FILE.open(encoding="utf-8") as file:
-            config = json.load(file)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"无法读取 {CONFIG_FILE.name}: {exc}") from exc
-
-    sources = config.get("ip_sources")
-    if not isinstance(sources, list) or not all(isinstance(item, str) for item in sources):
-        raise RuntimeError("config.json 的 ip_sources 必须是字符串数组")
-    return config
-
-
-def source_urls(config: Dict) -> List[str]:
-    override = os.getenv("IP_SOURCES", "").strip()
-    if override:
-        return [item.strip() for item in override.split(",") if item.strip()]
-    return [item.strip() for item in config["ip_sources"] if item.strip()]
+IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 
 
 def fetch_text(url: str) -> str:
-    """Fetch a text URL with short retries and a bounded timeout."""
-
-    last_error = "unknown error"
-    for attempt in range(1, 4):
+    last_err = None
+    for _ in range(RETRIES + 1):
         try:
-            request = Request(
-                url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,text/plain;q=0.9,*/*;q=0.8",
-                },
-            )
-            with urlopen(request, timeout=30) as response:
-                raw = response.read()
-                charset = response.headers.get_content_charset() or "utf-8"
-                return raw.decode(charset, errors="replace")
-        except (OSError, URLError) as exc:
-            last_error = str(exc)
-            if attempt < 3:
-                time.sleep(attempt)
-    raise RuntimeError(last_error)
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return resp.read().decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            time.sleep(2)
+    raise last_err
 
 
-def collect(urls: Iterable[str]) -> List[str]:
-    addresses: List[str] = []
-    seen = set()
-    successful_sources = 0
-
-    for url in urls:
-        print(f"[collect] {url}")
+def extract_ips(text: str):
+    found = []
+    for raw in IP_PATTERN.findall(text):
         try:
-            text = fetch_text(url)
-            found = extract_public_ipv4(text)
-            successful_sources += 1
-            print(f"         found {len(found)} public IPv4 address(es)")
-            for address in found:
-                if address not in seen:
-                    seen.add(address)
-                    addresses.append(address)
-        except Exception as exc:  # one broken source must not hide the others
-            print(f"         skipped: {exc}", file=sys.stderr)
-
-    if successful_sources == 0:
-        raise RuntimeError("所有 IP 来源均请求失败，保留旧的 ip.txt，不继续更新")
-    if not addresses:
-        raise RuntimeError("来源请求成功但没有找到公共 IPv4，保留旧的 ip.txt")
-    return addresses
-
-
-def write_atomically(addresses: List[str], max_records: int) -> None:
-    if max_records < 1:
-        raise RuntimeError("max_records 必须大于 0")
-    selected = addresses[:max_records]
-    temporary = OUTPUT_FILE.with_suffix(".txt.tmp")
-    temporary.write_text("".join(f"{address}\n" for address in selected), encoding="utf-8")
-    temporary.replace(OUTPUT_FILE)
-    print(f"[collect] wrote {len(selected)} address(es) to {OUTPUT_FILE.name}")
+            ip = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        # 只收公网 IPv4，过滤 127.0.0.1 / 10.x / 192.168.x / 169.254.x 等
+        if ip.version == 4 and ip.is_global:
+            found.append(raw)
+    return found
 
 
 def main() -> int:
-    config = load_config()
-    try:
-        max_records = int(os.getenv("MAX_RECORDS", str(config.get("max_records", 20))))
-    except ValueError as exc:
-        raise RuntimeError("MAX_RECORDS 必须是整数") from exc
+    merged = []  # 按数据源优先级顺序保留
+    seen = set()
+    ok_sources = 0
 
-    addresses = collect(source_urls(config))
-    write_atomically(addresses, max_records)
+    for src in SOURCES:
+        try:
+            text = fetch_text(src["url"])
+        except Exception as e:  # noqa: BLE001
+            print(f"[跳过] {src['name']}: {type(e).__name__}: {e}")
+            continue
+        ips = extract_ips(text)
+        new = []
+        for ip in ips:
+            if ip not in seen:  # 同一来源内部和跨来源都去重
+                seen.add(ip)
+                new.append(ip)
+                merged.append(ip)
+        if ips:
+            ok_sources += 1
+        print(f"[OK] {src['name']}: 抓到 {len(ips)} 个（新增 {len(new)}）")
+        time.sleep(1)
+
+    print(f"合计：{ok_sources}/{len(SOURCES)} 个源可用，去重后 {len(merged)} 个 IP")
+
+    if not merged:
+        print("错误：一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
+        return 1
+
+    # 按优先级截断配额，再排序输出（排序是为了让 git diff 稳定，避免无谓提交）
+    final = sorted(merged[:MAX_IPS], key=lambda s: tuple(int(p) for p in s.split(".")))
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(final) + "\n")
+
+    print(f"已写入 {OUTPUT_FILE}（{len(final)} 个 IP，上限 {MAX_IPS}）")
     return 0
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except Exception as exc:
-        print(f"[collect] ERROR: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+    sys.exit(main())

@@ -1,83 +1,60 @@
-name: 更新优选 IP 和 Cloudflare DNS
+name: 采集优选IP并更新DNS
 
 on:
-  # GitHub Actions 的 cron 使用 UTC；*/3 表示每 3 小时运行一次。
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: '17 */3 * * *'  # 每 3 小时一次（UTC，北京时间 05:17/08:17/11:17...）
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "只抓取并检查，不修改 Cloudflare DNS"
+        description: '只看计划，不实际改动 DNS'
         required: false
         default: false
         type: boolean
-  # 修改脚本后自动进行一次校验；ip.txt 的自动提交不会匹配这些路径，
-  # 因此不会因为提交产物而无限循环。
-  push:
-    branches: [main]
-    paths:
-      - "collect_ips.py"
-      - "bestdomain.py"
-      - "ip_utils.py"
-      - "config.json"
-      - ".github/workflows/update.yml"
 
-permissions:
-  contents: write
-
+# 防止上一次还没跑完下一次又启动
 concurrency:
   group: youxuanyuming-update
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
-    env:
-      DRY_RUN: ${{ inputs.dry_run || 'false' }}
-      MAX_RECORDS: "20"
-      MAX_DNS_RECORDS: "20"
-
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: '3.12'
 
-      - name: Collect public IPv4 addresses
+      - name: 采集优选IP
         run: python collect_ips.py
 
-      - name: Show generated list
+      - name: 提交 ip.txt
         run: |
-          echo "ip.txt lines: $(wc -l < ip.txt)"
-          sed -n '1,20p' ip.txt
-
-      - name: Commit updated ip.txt
-        run: |
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "dry_run=true，跳过提交 ip.txt"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ip.txt
-          if git diff --cached --quiet; then
-            echo "ip.txt 没有变化"
-          else
-            git commit -m "chore: update Cloudflare IPv4 list"
+          if [ -n "$(git status --porcelain ip.txt)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add ip.txt
+            git commit -m "chore: 更新优选IP列表 $(date -u '+%Y-%m-%d %H:%M') UTC"
             git push
+          else
+            echo "ip.txt 无变化，跳过提交"
           fi
 
-      - name: Update Cloudflare DNS
+      - name: 更新 Cloudflare DNS
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_NAME: 223226.xyz
+          DRY_RUN: ${{ inputs.dry_run == true && '1' || '' }}
         run: |
           if [ -z "$CF_API_TOKEN" ]; then
-            echo "::error::未配置 CF_API_TOKEN。请先在 Settings → Secrets and variables → Actions 中添加同名 Secret。"
-            exit 1
+            echo "::warning::未配置 CF_API_TOKEN（仓库 Settings → Secrets and variables → Actions），本次只采集不更新 DNS，配置好后的下个周期自动生效"
+            exit 0
           fi
           python bestdomain.py
