@@ -6,14 +6,16 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 GitHub Actions **每 3 小时**自动：
 
-1. 从多个公开的 Cloudflare 优选 IP 数据源抓取 IPv4（坏源自动跳过）
-2. 去重、校验、限量后写入 `ip.txt` 并提交到仓库
+1. 从 **8 个**公开的 Cloudflare 优选 IP 数据源抓取 IPv4（坏源自动跳过）
+2. 去重、校验、限量后写入 `ip.txt` 并提交到仓库；**只保留 Cloudflare 官方网段的 IP**（第三方反代 IP 会把流量导到陌生人的服务器上，一律过滤）
 3. 调 Cloudflare API，把下面两个域名的 A 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 精选，数量少质量高 |
-| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部数据源合并） | 全量，上限 50 个 |
+| `cf.223226.xyz` | [IPDB bestcf](https://ipdb.api.030101.xyz/?type=bestcf) + [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 精选，数量少质量高 |
+| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 8 个数据源合并） | 全量，上限 50 个 |
+
+`ip.txt` 的全部数据源（按优先级）：IPDB bestcf、ip.164746.xyz Top10、addressesapi 电信、cf.090227 三网接口（电信/移动/联通）、api.uouin.com、wetest.vip。
 
 > 为什么是灰云：优选域名的用法是客户端里「地址」填它（拿到一批好 IP），「SNI/Host」填你真正走 CF 代理的域名（如 Worker/Pages 域名）。如果开橙云，解析出来就又变回 CF 随机分配的 IP，失去优选意义。
 
@@ -67,6 +69,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - **多久更新一次？** 每 3 小时（UTC `17 */3 * * *`）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；两个域名各自的有效 IP 少于 2 个时会跳过更新、保留现有记录，不会清空。
+- **为什么有的来源抓到的 IP 会变少？** 脚本会过滤掉不属于 Cloudflare 官方网段的 IP（部分来源混有第三方反代节点，会把流量导到陌生服务器，不安全），只保留官方网段。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
 - **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
   `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
@@ -80,6 +83,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 去掉 `requests` / `beautifulsoup4` 依赖，只用标准库，CI 更快更稳
 - 两个 workflow（采集/DNS）合并为一个，消除时序依赖；频率从每 30 分钟放宽到每 3 小时
 - 采集脚本对无效/保留 IP 做了 `ipaddress` 校验，避免把网页里的版本号等杂质抓进来
+- 数据源扩充到 8 个（新增 IPDB 新版 API、090227 三网接口），并增加 Cloudflare 官方网段硬过滤，杜绝第三方反代 IP 混入
 
 ## 开源协议
 

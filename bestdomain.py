@@ -34,18 +34,29 @@ TIMEOUT = 30
 
 # 域名 -> IP 来源。http(s):// 开头则抓取，否则按本地文件读取（如 ip.txt）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选：测速 Top10 + 电信优选 + 微测网优选
+    # 精选：IPDB 每小时优选 + 测速 Top10 + 电信优选 + 微测网
     "cf": [
+        "https://ipdb.api.030101.xyz/?type=bestcf",
         "https://ip.164746.xyz/ipTop10.html",
         "https://addressesapi.090227.xyz/ct",
         "https://www.wetest.vip/page/cloudflare/address_v4.html",
     ],
-    # 全量：本仓库采集的合并列表
+    # 全量：本仓库采集的合并列表（8 个数据源）
     "cloudflare": ["ip.txt"],
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 HEADERS = {"User-Agent": "youxuanyuming/2.0"}
+
+# Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
+# 只保留官方网段的 IP，第三方反代 IP 一律不用（会把流量导到陌生服务器）
+CF_V4_RANGES = [
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+    "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+    "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+]
+_CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
 
 
 class CFError(Exception):
@@ -94,7 +105,8 @@ def extract_ips(text: str):
             ip = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        if ip.version == 4 and ip.is_global and raw not in out:
+        if (ip.version == 4 and ip.is_global and raw not in out
+                and any(ip in net for net in _CF_NETS)):
             out.append(raw)
     return out
 

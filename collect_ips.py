@@ -6,10 +6,10 @@
 特点：
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
 - 单个数据源挂了自动跳过，全部挂掉则报错退出且不动旧 ip.txt
-- 只保留公网 IPv4，自动剔除内网/保留地址，避免把网页里的版本号等误当代码抓进来
+- 只保留「Cloudflare 官方网段」内的公网 IPv4：第三方反代 IP 会把流量
+  导到陌生人的服务器上，一律过滤掉（见 CF_V4_RANGES）
 """
 import ipaddress
-import os
 import re
 import sys
 import time
@@ -17,15 +17,37 @@ import urllib.request
 
 # 数据源（按优先级排序，越靠前质量越高；抓不满配额时优先用靠前的）
 SOURCES = [
+    # IPDB 优选官方 IP（每小时更新，原项目数据源 ipdb 的新版 API 格式）
+    {"name": "IPDB bestcf", "url": "https://ipdb.api.030101.xyz/?type=bestcf"},
     # 每 10 分钟测速的 Top 优选（纯文本，逗号分隔）
     {"name": "ip.164746.xyz Top10", "url": "https://ip.164746.xyz/ipTop10.html"},
     # CloudFlareYes 电信优选（纯文本）
-    {"name": "addressesapi.090227.xyz/ct", "url": "https://addressesapi.090227.xyz/ct"},
+    {"name": "addressesapi 电信", "url": "https://addressesapi.090227.xyz/ct"},
+    # 090227 三网分类接口（电信/移动/联通）
+    {"name": "cf.090227 电信", "url": "https://cf.090227.xyz/ct?ips=6"},
+    {"name": "cf.090227 移动", "url": "https://cf.090227.xyz/cmcc?ips=8"},
+    {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu"},
     # 麒麟域名检测优选（HTML，用正则提取）
     {"name": "api.uouin.com", "url": "https://api.uouin.com/cloudflare.html"},
     # 微测网优选 IPv4（HTML 表格）
     {"name": "wetest.vip", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
 ]
+
+# Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
+# 若 Cloudflare 将来调整网段，需要同步更新这里
+CF_V4_RANGES = [
+    "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+    "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+    "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+    "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+]
+_CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
+
+
+def is_cloudflare_ip(ip) -> bool:
+    """是否属于 Cloudflare 官方网段（排除第三方反代/伙伴 IP）。"""
+    return any(ip in net for net in _CF_NETS)
+
 
 # ip.txt 最多保留多少个 IP（防止数据源异常返回海量地址，撑爆 DNS 记录）
 MAX_IPS = 50
@@ -61,8 +83,8 @@ def extract_ips(text: str):
             ip = ipaddress.ip_address(raw)
         except ValueError:
             continue
-        # 只收公网 IPv4，过滤 127.0.0.1 / 10.x / 192.168.x / 169.254.x 等
-        if ip.version == 4 and ip.is_global:
+        # 只收 Cloudflare 官方网段的公网 IPv4
+        if ip.version == 4 and ip.is_global and is_cloudflare_ip(ip):
             found.append(raw)
     return found
 
