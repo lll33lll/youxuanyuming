@@ -85,6 +85,7 @@ try:
     proxy_mode = bestdomain.extract_ips(open(proxyfile).read(), cf_only=False)
     check("官方模式只剩CF段IP", official_only == ["104.17.53.242"], str(official_only))
     check("反代模式保留公网非CF IP", proxy_mode == ["1.2.3.4", "8.8.8.8", "104.17.53.242"], str(proxy_mode))
+    check("WARP段IP被过滤", bestdomain.extract_ips("162.159.198.1\n104.17.53.242\n") == ["104.17.53.242"])
 finally:
     os.unlink(proxyfile)
 

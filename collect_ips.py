@@ -10,6 +10,8 @@
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
 - 单个数据源挂了自动跳过；官方源全挂则报错退出且不动旧文件
 - 反代源里只保留 "IP:443" 格式的行（DNS 优选域名只对 443 端口有意义）
+- 排除 WARP 专用网段（162.159.192.0/21 是 WARP/MASQUE 端点，
+  不能当普通优选 IP 用；bestcf.pages.dev 的文件头一行就是它）
 """
 import ipaddress
 import re
@@ -17,7 +19,7 @@ import sys
 import time
 import urllib.request
 
-# ============ 官方 IP 数据源（按优先级排序）============
+# ============ 官方 IP 数据源（按优先级排序，越靠前质量越高）============
 SOURCES = [
     # IPDB 优选官方 IP（每小时更新，原项目数据源 ipdb 的新版 API 格式）
     {"name": "IPDB bestcf", "url": "https://ipdb.api.030101.xyz/?type=bestcf"},
@@ -29,7 +31,17 @@ SOURCES = [
     {"name": "cf.090227 电信", "url": "https://cf.090227.xyz/ct?ips=6"},
     {"name": "cf.090227 移动", "url": "https://cf.090227.xyz/cmcc?ips=8"},
     {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu"},
-    # 麒麟域名检测优选（HTML，用正则提取）
+    # CloudFlareYes 三网（CM API 备用入口）
+    {"name": "CloudFlareYes 三网", "url": "https://addressesapi.090227.xyz/CloudFlareYes"},
+    # 以下为 bestcf.pages.dev 导航站收录的优选源（多为三网实测）
+    {"name": "vvhan 三网", "url": "https://bestcf.pages.dev/vvhan/ipv4.txt"},
+    {"name": "NiREvil 三网", "url": "https://bestcf.pages.dev/nirevil/ipv4.txt"},
+    {"name": "天诚 三网", "url": "https://raw.githubusercontent.com/gshtwy/CF-DNS-Clone/refs/heads/main/wetest-cloudflare-v4.txt"},
+    {"name": "Senflare", "url": "https://raw.githubusercontent.com/Senflare/Senflare-IP/refs/heads/main/IPlist-Pro.txt"},
+    {"name": "Einsitang", "url": "https://raw.githubusercontent.com/einsitang/my-fast-cf-ip/refs/heads/master/fastips.txt"},
+    # Joname 采集聚合（每 4 小时更新，量大）
+    {"name": "Joname 聚合", "url": "https://raw.githubusercontent.com/joname1/BestCFip/refs/heads/main/ipv4.txt"},
+    # 麒麟域名检测优选（HTML，用正则提取，量大）
     {"name": "api.uouin.com", "url": "https://api.uouin.com/cloudflare.html"},
     # 微测网优选 IPv4（HTML 表格）
     {"name": "wetest.vip", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
@@ -40,10 +52,20 @@ SOURCES = [
 PROXY_SOURCES = [
     # IPDB 优选反代 IP（每小时实测）
     {"name": "IPDB bestproxy", "url": "https://ipdb.api.030101.xyz/?type=bestproxy", "port443_only": False},
+    # MJZ 三网实测（每 45 分钟更新）
+    {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True},
+    {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True},
     # 陕西移动实测高速优选（带延迟/带宽标注）
-    {"name": "gaoji.uk 高速优选", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True},
-    # 多项目聚合 bestips（每 3 小时更新）
-    {"name": "LancelotRar bestips", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "port443_only": True},
+    {"name": "gaoji.uk 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True},
+    # LZ 联通实测（每 2 小时更新）
+    {"name": "LZ 联通", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True},
+    # Xiaobei09 二筛稳定版（带速度标注）
+    {"name": "Xiaobei09 稳定", "url": "https://raw.githubusercontent.com/Xiaobei09/ProxyIP/main/data/valid/all_46_ltd_stable.txt", "port443_only": True},
+    # 多项目聚合 bestips（每 3 小时更新，量大兜底）
+    {"name": "LancelotRar 聚合", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "port443_only": True},
+    # 以下为兜底大池子
+    {"name": "S5公益", "url": "https://bestcf.pages.dev/s5gy/all.txt", "port443_only": True},
+    {"name": "Laziji", "url": "https://bestcf.pages.dev/lzj/all.txt", "port443_only": True},
 ]
 
 # Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
@@ -55,6 +77,11 @@ CF_V4_RANGES = [
     "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
 ]
 _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
+
+# WARP 专用网段（WARP/MASQUE 端点只服务 WireGuard/MASQUE，不服务普通 SNI 代理，
+# 不能混进优选池；bestcf.pages.dev 每个文件的头一行 162.159.198.1 就是它）
+WARP_V4_RANGES = ["162.159.192.0/21"]
+_WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 
 # 输出上限
 MAX_IPS = 50        # ip.txt（官方优选）
@@ -85,15 +112,20 @@ def fetch_text(url: str) -> str:
 
 
 def _valid_public_ipv4(raw: str):
+    """是公网 IPv4 且不属于 WARP 专用段，返回 ip 对象；否则 None。"""
     try:
         ip = ipaddress.ip_address(raw)
     except ValueError:
         return None
-    return ip if (ip.version == 4 and ip.is_global) else None
+    if ip.version != 4 or not ip.is_global:
+        return None
+    if any(ip in net for net in _WARP_NETS):
+        return None
+    return ip
 
 
 def extract_ips(text: str):
-    """官方优选：只收 Cloudflare 官方网段的公网 IPv4。"""
+    """官方优选：只收 Cloudflare 官方网段的公网 IPv4（排除 WARP 段）。"""
     found = []
     for raw in IP_PATTERN.findall(text):
         ip = _valid_public_ipv4(raw)
