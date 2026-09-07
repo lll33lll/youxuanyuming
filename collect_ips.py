@@ -6,6 +6,8 @@
 - ip.txt    官方网段优选 IP（cf. / cloudflare. 域名用，只保留 CF 官方网段）
 - proxy.txt 第三方反代节点 IP（proxy. 域名用）
 
+用法：python collect_ips.py [official|proxy|all]（默认 all）
+
 特点：
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
 - 单个数据源挂了自动跳过；官方源全挂则报错退出且不动旧文件
@@ -201,21 +203,28 @@ def write_file(path: str, ips, cap: int):
 
 
 def main() -> int:
+    # 范围参数：official=只采官方(ip.txt)，proxy=只采反代(proxy.txt)，all=都采
+    scope = "all"
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if args and args[0] in ("official", "proxy", "all"):
+        scope = args[0]
     rc = 0
 
-    official = run_collection(SOURCES, lambda t, s: extract_ips(t), "官方")
-    if official:
-        write_file("ip.txt", official, MAX_IPS)
-    else:
-        print("错误：官方优选一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
-        rc = 1
+    if scope in ("all", "official"):
+        official = run_collection(SOURCES, lambda t, s: extract_ips(t), "官方")
+        if official:
+            write_file("ip.txt", official, MAX_IPS)
+        else:
+            print("错误：官方优选一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
+            rc = 1
 
-    proxies = run_collection(
-        PROXY_SOURCES, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), "反代")
-    if proxies:
-        write_file("proxy.txt", proxies, MAX_PROXY_IPS)
-    else:
-        print("[反代] 警告：一个反代 IP 都没抓到，保留旧 proxy.txt（不影响官方域名维护）")
+    if scope in ("all", "proxy"):
+        proxies = run_collection(
+            PROXY_SOURCES, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), "反代")
+        if proxies:
+            write_file("proxy.txt", proxies, MAX_PROXY_IPS)
+        else:
+            print("[反代] 警告：一个反代 IP 都没抓到，保留旧 proxy.txt（不影响官方域名维护）")
 
     return rc
 

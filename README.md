@@ -4,17 +4,22 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 ## 它做什么
 
-GitHub Actions **每 1.5 小时**自动：
+GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
-1. 从 **27 个**公开数据源抓取 IPv4（坏源自动跳过）：18 个官方 IP 源 + 9 个反代源；其中 3 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan) 等，站长实测维护）
+- **官方池**（`cf` / `cloudflare`）：每 **3 小时**换新（:17 批次）
+- **反代池**（`proxy`）：每 **1.5 小时**换新（:17 批次跑全量 + :47 批次只跑反代）
+
+每次运行：
+
+1. 按 27 个公开数据源抓取 IPv4（坏源自动跳过）：18 个官方 IP 源 + 9 个反代源；其中 3 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan) 等，站长实测维护）
 2. 去重、校验、限量后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（并排除 WARP 专用段）
 3. 调 Cloudflare API，把下面三个域名的 A 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [IPDB bestcf](https://ipdb.api.030101.xyz/?type=bestcf) + [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选 |
-| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 18 个官方源合并） | 官方网段·全量，上限 50 个 |
-| `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个 |
+| `cf.223226.xyz` | [IPDB bestcf](https://ipdb.api.030101.xyz/?type=bestcf) + [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选，每 3 小时 |
+| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 18 个官方源合并） | 官方网段·全量，上限 50 个，每 3 小时 |
+| `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个，每 1.5 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
@@ -68,12 +73,13 @@ nslookup proxy.223226.xyz
 
 Actions → **采集优选IP并更新DNS** → **Run workflow**：
 
+- **范围**选 `all`（默认，官方+反代）/ `official`（只官方）/ `proxy`（只反代）
 - 直接运行 = 立即采集并更新 DNS
 - 勾选 **dry_run** = 只打印将要增删的记录，不实际改动
 
 ## 常见问题
 
-- **多久更新一次？** 每 1.5 小时（两条 cron 错开 90 分钟：UTC `17 0,3,6,...` + `47 1,4,7,...`）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1.5 小时（再叠加 `47 1,4,7,...` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；两个域名各自的有效 IP 少于 2 个时会跳过更新、保留现有记录，不会清空。
 - **为什么有的来源抓到的 IP 会变少？** 官方域名（cf/cloudflare）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
@@ -95,7 +101,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增反代域名 `proxy.223226.xyz` 与 `proxy.txt`（IPDB bestproxy + gaoji.uk + LancelotRar，只取 443 端口），与官方域名分开维护
 - 数据源扩充到 24 个（官方 15 + 反代 9，参考 bestcf.pages.dev 导航站收录），并排除 WARP 专用网段（162.159.192.0/21，bestcf.pages.dev 文件头的 162.159.198.1 是 WARP 端点，不能当优选 IP）
 - 新增「优选域名 A 记录采集」源型（dns 型源）：saas.sin.fan、cf.cloudflare.182682.xyz、bestcf.030101.xyz（均已验证为站长实测维护的灰云记录）
-- 同步频率提升到每 1.5 小时（两条 cron 错开 90 分钟实现）
+- 同步频率拆分：官方池每 3 小时、反代池每 1.5 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 
 ## 开源协议
 

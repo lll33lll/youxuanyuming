@@ -110,5 +110,15 @@ try:
 finally:
     os.unlink(proxyfile)
 
+print("== 场景8：范围过滤（official/proxy/all） ==")
+check("official→只含官方域名", set(bestdomain.select_subdomains("official")) == {"cf", "cloudflare"})
+check("proxy→只含反代域名", set(bestdomain.select_subdomains("proxy")) == {"proxy"})
+check("all→三个域名", set(bestdomain.select_subdomains("all")) == {"cf", "cloudflare", "proxy"})
+try:
+    bestdomain.select_subdomains("bogus")
+    check("非法范围报错", False)
+except Exception:
+    check("非法范围报错", True)
+
 print(f"\n结果：{PASS} 通过，{FAIL} 失败")
 sys.exit(1 if FAIL else 0)
