@@ -21,14 +21,16 @@ def check(name, cond, extra=""):
         print(f"  FAIL  {name}  {extra}")
 
 
-def run_case(existing_records, sources=None, dry_run=False):
-    """existing_records: [{'id','content','comment'}]"""
+def run_case(existing_records, sources=None, dry_run=False, existing6_records=None):
+    """existing_records: [{'id','content','comment'}]（A）；existing6_records 同理（AAAA）"""
     calls = []
     zone_id = "z0"
 
     def fake_cf(method, path, body=None):
         calls.append((method, path, body))
         if method == "GET" and path.startswith(f"/zones/{zone_id}/dns_records"):
+            if "type=AAAA" in path:
+                return existing6_records or []
             return existing_records
         if method == "GET" and path.startswith("/zones?"):
             return [{"id": zone_id, "name": "223226.xyz"}]
@@ -119,6 +121,25 @@ try:
     check("非法范围报错", False)
 except Exception:
     check("非法范围报错", True)
+
+print("== 场景9：static 源的 v4+v6（A + AAAA 记录） ==")
+stext = bestdomain.fetch_text("static:104.17.53.242,2606:4700:ff00:262e:715d:8689:5b7a:97b5")
+check("static v4 提取", bestdomain.extract_ips(stext) == ["104.17.53.242"], str(bestdomain.extract_ips(stext)))
+check("static v6 提取", bestdomain.extract_ips6(stext) == ["2606:4700:ff00:262e:715d:8689:5b7a:97b5"], str(bestdomain.extract_ips6(stext)))
+check("v6 非 CF 官方段被过滤", bestdomain.extract_ips6("::1 2001:db8::1 2606:4700::1") == ["2606:4700::1"])
+calls = []
+def fake_cf9(method, path, body=None):
+    calls.append((method, path, body))
+    if path.startswith("/zones?"):
+        return [{"id": "z0", "name": "223226.xyz"}]
+    return []
+bestdomain.cf = fake_cf9
+bestdomain.update_subdomain("z0", "223226.xyz", "test",
+                            ["static:104.17.53.242,2606:4700:ff00:262e:715d:8689:5b7a:97b5"], False)
+aposts = [c for c in calls if c[0] == "POST" and c[2]["type"] == "A"]
+aaaaposts = [c for c in calls if c[0] == "POST" and c[2]["type"] == "AAAA"]
+check("A 记录创建", len(aposts) == 1 and aposts[0][2]["content"] == "104.17.53.242")
+check("AAAA 记录创建", len(aaaaposts) == 1 and aaaaposts[0][2]["content"] == "2606:4700:ff00:262e:715d:8689:5b7a:97b5")
 
 print(f"\n结果：{PASS} 通过，{FAIL} 失败")
 sys.exit(1 if FAIL else 0)

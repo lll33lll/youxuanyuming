@@ -13,11 +13,11 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 1. 按 25 个公开数据源抓取 IPv4（坏源自动跳过）：16 个官方 IP 源 + 9 个反代源；其中 1 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan)，站长实测维护）
 2. 去重、校验、限量后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（并排除 WARP 专用段）；源大面积异常时保留旧文件不写（防池子被砍残）
-3. 调 Cloudflare API，把下面三个域名的 A 记录同步成最新优选 IP（**灰云 / DNS-only**）：
+3. 调 Cloudflare API，把下面三个域名的 A/AAAA 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（static 锁定多视角全部 7 条已知 IP + dns-multi 自动发现新记录）+ [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选，每 3 小时 |
+| `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（static 锁定 9 条 IPv4 + 1 条 IPv6 多视角 IP + dns-multi 自动发现）+ [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选，每 3 小时 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 16 个官方源合并） | 官方网段·全量，上限 50 个，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个，每 1.5 小时 |
 
@@ -55,12 +55,13 @@ Fork 的 Actions 默认禁用。打开仓库 **Actions** 标签页，点绿色�
 ## 验证
 
 ```bash
-nslookup cf.223226.xyz
+nslookup -type=A cf.223226.xyz     # IPv4（A 记录）
+nslookup -type=AAAA cf.223226.xyz  # IPv6（AAAA 记录）
 nslookup cloudflare.223226.xyz
 nslookup proxy.223226.xyz
 ```
 
-前两个会解析出一批 104.x / 162.159.x / 172.64.x 的官方网段地址；`proxy.223226.xyz` 解析出的是第三方反代 IP。
+cf/cloudflare 会解析出一批 104.x / 162.159.x / 172.64.x 的官方网段地址（cf 另有 1 条 IPv6）；`proxy.223226.xyz` 解析出的是第三方反代 IP。
 
 ## 怎么用
 
@@ -68,6 +69,7 @@ nslookup proxy.223226.xyz
 
 - **address / server** 填 `cf.223226.xyz`、`cloudflare.223226.xyz`（官方 IP）或 `proxy.223226.xyz`（反代 IP，需自担风险）
 - **SNI / Host / peer** 填你真正走 CF 的域名（例如你自己的 Worker、Pages 或其它橙云域名）
+- `cf.223226.xyz` 支持 IPv6（AAAA 记录），有 v6 网络的客户端可以直接用
 
 ## 手动运行 / 试运行
 
@@ -80,9 +82,10 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 ## 常见问题
 
 - **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1.5 小时（再叠加 `47 1,4,7,...` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
-- **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
+- **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A/AAAA 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；源大面积异常（可用源少于 1/4 或结果少于 10 个）时保留旧文件不动；两个域名各自的有效 IP 少于 2 个时会跳过更新，不会清空。
 - **为什么有的来源抓到的 IP 会变少？** 官方域名（cf/cloudflare）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
+- **IPv6 怎么用？** `cf.223226.xyz` 有 1 条 AAAA 记录（常驻）；IPv4 进 A 记录、IPv6 进 AAAA 记录分开维护，互不干扰。
 - **反代 IP 是什么？** 第三方架设的中转服务器，帮你把流量转发到 Cloudflare。速度可能更快，但流量会经过陌生人的服务器，请自行权衡（见上方风险须知）。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
 - **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
@@ -104,7 +107,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增「多视角 DNS 采集」源型（dns-multi 型源）与「固定 IP 列表」源型（static 型源）
 - 同步频率拆分：官方池每 3 小时、反代池每 1.5 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时不写文件，防止网络故障时把池子砍残
-- `cf` 域名源定型：ipTop10 + SIN 优选域名（static 锁定全部 7 条多视角已知 IP + dns-multi 自动发现）+ CloudFlareYes 电信 + 微测网
+- `cf` 域名源定型：ipTop10 + SIN 优选域名（static 锁定 9 条 IPv4 + 1 条 IPv6 多视角 IP + dns-multi 自动发现）+ CloudFlareYes 电信 + 微测网；新增 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段）
 
 ## 开源协议
 
