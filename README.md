@@ -17,7 +17,7 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [saas.sin.fan](https://saas.sin.fan) SIN 优选域名 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选，每 3 小时 |
+| `cf.223226.xyz` | [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（**临时测试模式：只保留此源**，另外三个源暂移除） | 官方网段·精选，每 3 小时 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 16 个官方源合并） | 官方网段·全量，上限 50 个，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个，每 1.5 小时 |
 
@@ -103,7 +103,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增「优选域名 A 记录采集」源型（dns 型源）：saas.sin.fan（已验证为站长实测维护的灰云记录）
 - 同步频率拆分：官方池每 3 小时、反代池每 1.5 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时不写文件，防止网络故障时把池子砍残
-- `cf` 域名源最终定型：ipTop10 + SIN 优选域名 saas.sin.fan（dns 型）+ CloudFlareYes 电信 + 微测网
+- `cf` 域名源最终定型：ipTop10 + SIN 优选域名 saas.sin.fan（dns 型）+ CloudFlareYes 电信 + 微测网；当前处于**临时测试模式**（只保留 SIN 源，其余三个暂移除，测试完恢复）
 
 ## 开源协议
 

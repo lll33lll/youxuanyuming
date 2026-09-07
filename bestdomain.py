@@ -42,13 +42,13 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns: 开头则解析 A 记录，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：测速 Top10 + SIN 优选域名 + 电信优选 + 微测网
+    # 精选官方：【临时测试模式】只保留 SIN 优选域名，以下三个源暂时移除（测试完加回）
+    #   https://ip.164746.xyz/ipTop10.html
+    #   https://addressesapi.090227.xyz/ct
+    #   https://www.wetest.vip/page/cloudflare/address_v4.html
     "cf": {
         "sources": [
-            "https://ip.164746.xyz/ipTop10.html",
             "dns:saas.sin.fan",
-            "https://addressesapi.090227.xyz/ct",
-            "https://www.wetest.vip/page/cloudflare/address_v4.html",
         ],
         "cf_only": True,
     },
