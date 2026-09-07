@@ -8,9 +8,10 @@
 
 用法：python collect_ips.py [official|proxy|all]（默认 all）
 
-ip.txt 的筛选法（三网质量打分，而非按来源优先级截取）：
+两个池子的筛选法（三网质量打分，而非按来源优先级截取）：
 - 三网覆盖（每覆盖一家 +20 分）：数据源带的电信/联通/移动实测标签
-- 实测数值：uouin 等源自带的延迟（越低越好，最高 +30）与速度 mb/s（最高 +50）
+- 实测数值：uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源自带的延迟（越低越好，最高 +30）
+  与速度 mb/mbps/M（越快越好，最高 +50）
 - 多源共识（每个独立来源 +10）：被越多数据源同时收录，说明各家测试都认可
 - 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库
 - 最终按总分排序取前 50
@@ -18,7 +19,7 @@ ip.txt 的筛选法（三网质量打分，而非按来源优先级截取）：
 
 其他特点：
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
-- 单个数据源挂了自动跳过；官方源大面积异常时保留旧文件不动（防池子被砍残）
+- 单个数据源挂了自动跳过；源大面积异常时保留旧文件不动（防池子被砍残）
 - 反代源里只保留 "IP:443" 格式的行（DNS 优选域名只对 443 端口有意义）
 - 排除 WARP 专用网段（162.159.192.0/21，WARP 端点不能当普通优选 IP 用）
 """
@@ -64,23 +65,33 @@ SOURCES = [
 
 # ============ 反代 IP 数据源（第三方架设的中转节点，流量会经过第三方服务器）============
 # port443_only=True 的源只保留 "IP:443" 格式的行（非 443 端口对 DNS 优选域名无意义）
+# carriers 字段：该源整体代表的运营商视角（行内还会再解析 电信/联通/移动 标签）
 PROXY_SOURCES = [
     # IPDB 优选反代 IP（每小时实测）
     {"name": "IPDB bestproxy", "url": "https://ipdb.api.030101.xyz/?type=bestproxy", "port443_only": False},
-    # MJZ 三网实测（每 45 分钟更新）
-    {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True},
-    {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True},
-    # 陕西移动实测高速优选（带延迟/带宽标注）
-    {"name": "gaoji.uk 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True},
+    # MJZ 三网实测（每 45 分钟更新，带速度标注 "13M"）
+    {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True, "carriers": ["联通"]},
+    {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
+    # 陕西移动实测高速优选（带延迟/速度标注 "52.69ms 9.85Mbps"）
+    {"name": "gaoji.uk 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
     # LZ 联通实测（每 2 小时更新）
-    {"name": "LZ 联通", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True},
-    # Xiaobei09 二筛稳定版（带速度标注）
+    {"name": "LZ 联通", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
+    # Xiaobei09 二筛稳定版（带延迟/速度标注 "28ms-27.40MB/s"）
     {"name": "Xiaobei09 稳定", "url": "https://raw.githubusercontent.com/Xiaobei09/ProxyIP/main/data/valid/all_46_ltd_stable.txt", "port443_only": True},
+    # Xgonce 实测库（每 6 小时，CSV 格式自带速度+TCP/TLS 延迟，转换成标准行格式）
+    {"name": "Xgonce 实测", "url": "https://raw.githubusercontent.com/xgonce/Cloudflare_IP/refs/heads/main/result.csv",
+     "port443_only": True, "csv": "xgonce"},
     # 多项目聚合 bestips（每 3 小时更新，量大兜底）
     {"name": "LancelotRar 聚合", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "port443_only": True},
-    # 以下为兜底大池子
+    # 以下为 bestcf.pages.dev 导航站收录的优选源（地区标注，作候选池）
+    {"name": "YuTian", "url": "https://bestcf.pages.dev/yutian/all.txt", "port443_only": True},
+    {"name": "Mia", "url": "https://bestcf.pages.dev/xinyitang3/ipv4.txt", "port443_only": True},
+    {"name": "洛璃", "url": "https://bestcf.pages.dev/luoli/all.txt", "port443_only": True},
+    {"name": "天诚", "url": "https://bestcf.pages.dev/tiancheng/all.txt", "port443_only": True},
     {"name": "S5公益", "url": "https://bestcf.pages.dev/s5gy/all.txt", "port443_only": True},
     {"name": "Laziji", "url": "https://bestcf.pages.dev/lzj/all.txt", "port443_only": True},
+    # CM IP库（大池子兜底，1 万+ 条）
+    {"name": "CM IP库", "url": "https://zip.cm.edu.kg/all.txt", "port443_only": True},
 ]
 
 # Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
@@ -99,7 +110,7 @@ _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 
 # 输出上限
 MAX_IPS = 50        # ip.txt（官方优选，打分排序取前 50）
-MAX_PROXY_IPS = 50  # proxy.txt（反代，取质量优先的前 50 个）
+MAX_PROXY_IPS = 50  # proxy.txt（反代，打分排序取前 50）
 TIMEOUT = 20
 RETRIES = 2
 
@@ -111,7 +122,8 @@ HEADERS = {
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 LINE_443_PATTERN = re.compile(r"^\s*((?:\d{1,3}\.){3}\d{1,3}):443\b")
 LATENCY_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*ms")
-SPEED_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*mb(?:/s)?\b", re.I)
+# 匹配 55.36mb / 6.92mb/s / 9.85Mbps / 27.40MB/s / 13M（MJZ 的简写）等速度写法
+SPEED_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*m(?:b(?:/s|ps)?)?(?![a-zA-Z0-9])", re.I)
 
 
 def fetch_text(url: str) -> str:
@@ -171,11 +183,35 @@ def extract_proxy_ips(text: str, port443_only: bool = False):
     return found
 
 
+def parse_xgonce_csv(text: str) -> str:
+    """Xgonce result.csv 转标准行格式（只留 443 端口，带速度/延迟标注）。
+
+    CSV 列：IP,cf-meta-ip,端口,速度(Mbps),CF归属国,机房,TCP延迟(ms),TLS延迟(ms)
+    转成 "IP:443#Xgonce实测 76.5ms 98.25Mbps" 供统一的提取/打分逻辑使用。
+    """
+    out = []
+    for line in text.splitlines():
+        parts = line.strip().lstrip("\ufeff").split(",")
+        if len(parts) < 8:
+            continue
+        ip, port = parts[0], parts[2]
+        if port != "443":
+            continue
+        try:
+            ipaddress.ip_address(ip)
+            speed = float(parts[3])
+            lat = min(float(parts[6]), float(parts[7]))
+        except ValueError:
+            continue
+        out.append(f"{ip}:443#Xgonce实测 {lat:.1f}ms {speed:.2f}Mbps")
+    return "\n".join(out)
+
+
 def enrich_info(info, text, src_carriers):
     """从源文本提取三网标签与延迟/速度数值，更新到 info。
 
     按行或 HTML 表格行（<tr>）分块；块内出现 电信/联通/移动 记运营商覆盖，
-    出现 "136.85ms" 记延迟、“55.36mb"/"6.92mb/s" 记带宽（多块取最优值）。
+    出现 "136.85ms" 记延迟、“55.36mb"/“6.92mb/s"/“9.85Mbps"/“13M” 记速度（多块取最优值）。
     uouin 的 HTML 表格里运营商、IP、延迟、带宽同在一个 <tr> 行内（每个 <td>
     内部有换行），必须按 <tr> 整行切块而不是按换行切。
     """
@@ -238,6 +274,8 @@ def run_collection(sources, extract, label):
                 text = resolve_dns_source(src["dns"])
             else:
                 text = fetch_text(src["url"])
+            if src.get("csv") == "xgonce":
+                text = parse_xgonce_csv(text)
         except Exception as e:  # noqa: BLE001
             print(f"[跳过][{label}] {src['name']}: {type(e).__name__}: {e}")
             continue
@@ -313,10 +351,30 @@ def main() -> int:
             rc = 1
 
     if scope in ("all", "proxy"):
-        proxies, ok, _ = run_collection(
+        proxies, ok, pinfo = run_collection(
             PROXY_SOURCES, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), "反代")
         if ok >= min_sources_ok(len(PROXY_SOURCES)) and len(proxies) >= 10:
-            write_file("proxy.txt", proxies, MAX_PROXY_IPS)
+            # 三网质量打分排序（与官方池同一套打分：三网覆盖 + 实测数值 + 多源共识）
+            ranked = sorted(proxies,
+                            key=lambda ip: (-score_of(pinfo[ip]), tuple(int(p) for p in ip.split("."))))
+            to_verify = ranked[:MAX_PROXY_IPS + 30]
+            print(f"[反代] 存活验证 {len(to_verify)} 个候选（TCP 443，并发）...")
+            alive = alive_check(to_verify)
+            print(f"[反代] 存活 {len(alive)}/{len(to_verify)}")
+            if len(alive) >= 10:
+                final = alive[:MAX_PROXY_IPS]
+            else:
+                print("[反代] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 50")
+                final = ranked[:MAX_PROXY_IPS]
+            write_file("proxy.txt", final, MAX_PROXY_IPS)
+            print("[反代] 三网质量打分 Top10：")
+            for ip in final[:10]:
+                ent = pinfo[ip]
+                lat = f"{ent['latency']:.0f}ms" if ent["latency"] is not None else "-"
+                spd = f"{ent['speed']:.1f}MB/s" if ent["speed"] is not None else "-"
+                nets = "/".join(sorted(ent["carriers"])) if ent["carriers"] else "-"
+                print(f"  {ip:18s} 分数{score_of(ent):6.1f} | 来源{len(ent['sources'])} | "
+                      f"三网{nets} | {lat} {spd}")
         else:
             print(f"[反代] 警告：反代源大面积异常（{ok}/{len(PROXY_SOURCES)} 可用，仅 {len(proxies)} 个 IP），"
                   "保留旧 proxy.txt（不影响官方域名维护）")
