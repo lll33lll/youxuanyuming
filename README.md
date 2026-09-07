@@ -12,18 +12,18 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 每次运行：
 
 1. 按 25 个公开数据源抓取 IPv4（坏源自动跳过）：16 个官方 IP 源 + 9 个反代源；其中 1 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan)，站长实测维护）
-2. 去重、校验、限量后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（并排除 WARP 专用段）；源大面积异常时保留旧文件不写（防池子被砍残）
+2. 去重、校验后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（排除 WARP 专用段），并按**三网质量打分**排序取前 50：**三网覆盖标签（电信/联通/移动，每家 +20）+ 实测延迟/速度数值（uouin 等源自带，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ TCP 443 存活验证（死 IP 不入库）**；源大面积异常时保留旧文件不写（防池子被砍残）
 3. 调 Cloudflare API，把下面三个域名的 A/AAAA 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
 | `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现）+ [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct)（wetest 原站改版 JS 渲染后已移除） | 官方网段·精选，每 3 小时 |
-| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 16 个官方源合并） | 官方网段·全量，上限 50 个，每 3 小时 |
+| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（16 源候选池 → 三网质量打分 + 存活验证，取 Top 50） | 官方网段·质量优选，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个，每 1.5 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
-`ip.txt` 的数据源（16 个，按优先级）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、vvhan 三网、NiREvil 三网、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com、wetest.vip。
+`ip.txt` 的候选数据源（16 个，合并去重后按三网质量打分取 Top 50）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、vvhan 三网、NiREvil 三网、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com（带电信实测延迟/速度数值）、wetest.vip（已改版 JS 渲染，无静态数据）。
 `proxy.txt` 的数据源（9 个，按优先级）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测）、gaoji.uk 移动实测、LZ 联通实测、Xiaobei09 二筛稳定版、LancelotRar 聚合、S5公益、Laziji。
 
 来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。已排查并排除的伪优选域名：cf.877774.xyz（CNAME 蹭 www.wto.org 橙云记录）、youxuan.cf.090227.xyz（轮换 CNAME 到 Coinbase/Udacity CDN）、cf.3666888.xyz（GeoDNS 分地区，海外视角拿不到国内记录）。
@@ -81,13 +81,14 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 ## 常见问题
 
 - **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1.5 小时（再叠加 `47 1,4,7,...` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **`cloudflare.223226.xyz` 的 IP 怎么选出来的？** 三网质量打分制：三网覆盖标签（电信/联通/移动每家 +20 分）+ 实测延迟/速度（uouin 等源带的 ms/mb 数值，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ 写入前 TCP 443 存活验证（死 IP 不入库），总分排序取 Top 50。注：GitHub runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A/AAAA 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；源大面积异常（可用源少于 1/4 或结果少于 10 个）时保留旧文件不动；两个域名各自的有效 IP 少于 2 个时会跳过更新，不会清空。
 - **为什么有的来源抓到的 IP 会变少？** 官方域名（cf/cloudflare）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
 - **IPv6 支持吗？** 支持（IPv6 会进 AAAA 记录，与 A 记录分开维护）；当前配置未启用 v6 IP。
 - **反代 IP 是什么？** 第三方架设的中转服务器，帮你把流量转发到 Cloudflare。速度可能更快，但流量会经过陌生人的服务器，请自行权衡（见上方风险须知）。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
-- **ip.txt 是什么？** 全量采集结果（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
+- **ip.txt 是什么？** 三网质量打分 Top 50（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
   `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
 
 ## 相对上游的改动
@@ -107,6 +108,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 同步频率拆分：官方池每 3 小时、反代池每 1.5 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时不写文件，防止网络故障时把池子砍残
 - `cf` 域名源定型：ipTop10 + SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现）+ CloudFlareYes 电信（wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
+- `ip.txt` 筛选改为**三网质量打分制**：三网覆盖标签 + uouin 实测延迟/速度数值 + 多源共识 + TCP 443 存活验证，综合排序取 Top 50（取代按来源优先级截取；uouin 的 HTML 表格按 `<tr>` 行块解析出运营商/延迟/带宽）
 
 ## 开源协议
 
