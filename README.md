@@ -6,22 +6,22 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 GitHub Actions **每 3 小时**自动：
 
-1. 从 **24 个**公开数据源抓取 IPv4（坏源自动跳过）：15 个官方 IP 源 + 9 个反代源
+1. 从 **27 个**公开数据源抓取 IPv4（坏源自动跳过）：18 个官方 IP 源 + 9 个反代源；其中 3 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan) 等，站长实测维护）
 2. 去重、校验、限量后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（并排除 WARP 专用段）
 3. 调 Cloudflare API，把下面三个域名的 A 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
 | `cf.223226.xyz` | [IPDB bestcf](https://ipdb.api.030101.xyz/?type=bestcf) + [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct) + [微测网](https://www.wetest.vip/page/cloudflare/address_v4.html) | 官方网段·精选 |
-| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 15 个官方源合并） | 官方网段·全量，上限 50 个 |
+| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（全部 18 个官方源合并） | 官方网段·全量，上限 50 个 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（[IPDB bestproxy](https://ipdb.api.030101.xyz/?type=bestproxy) + MJZ 联通/电信 + [gaoji.uk](https://ips.gaoji.uk/best_ips.txt) 移动 + LZ 联通 + Xiaobei09 稳定版 + LancelotRar/S5/Laziji 聚合兜底，只取 443 端口） | **第三方反代节点**，上限 50 个 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
-`ip.txt` 的数据源（15 个，按优先级）：IPDB bestcf、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、vvhan 三网、NiREvil 三网、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com、wetest.vip。
+`ip.txt` 的数据源（18 个，按优先级）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、**cf.cloudflare.182682.xyz / bestcf.030101.xyz 优选域名**（A 记录采集）、vvhan 三网、NiREvil 三网、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com、wetest.vip。
 `proxy.txt` 的数据源（9 个，按优先级）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测）、gaoji.uk 移动实测、LZ 联通实测、Xiaobei09 二筛稳定版、LancelotRar 聚合、S5公益、Laziji。
 
-来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。
+来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。已排查并排除的伪优选域名：cf.877774.xyz（CNAME 蹭 www.wto.org 橙云记录）、youxuan.cf.090227.xyz（轮换 CNAME 到 Coinbase/Udacity CDN）、cf.3666888.xyz（GeoDNS 分地区，海外视角拿不到国内记录）。
 
 > 为什么是灰云：优选域名的用法是客户端里「地址」填它（拿到一批好 IP），「SNI/Host」填你真正走 CF 代理的域名（如 Worker/Pages 域名）。如果开橙云，解析出来就又变回 CF 随机分配的 IP，失去优选意义。
 
@@ -94,6 +94,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 数据源扩充到 8 个（新增 IPDB 新版 API、090227 三网接口），并增加 Cloudflare 官方网段硬过滤，杜绝第三方反代 IP 混入
 - 新增反代域名 `proxy.223226.xyz` 与 `proxy.txt`（IPDB bestproxy + gaoji.uk + LancelotRar，只取 443 端口），与官方域名分开维护
 - 数据源扩充到 24 个（官方 15 + 反代 9，参考 bestcf.pages.dev 导航站收录），并排除 WARP 专用网段（162.159.192.0/21，bestcf.pages.dev 文件头的 162.159.198.1 是 WARP 端点，不能当优选 IP）
+- 新增「优选域名 A 记录采集」源型（dns 型源）：saas.sin.fan、cf.cloudflare.182682.xyz、bestcf.030101.xyz（均已验证为站长实测维护的灰云记录）
 
 ## 开源协议
 

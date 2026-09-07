@@ -15,14 +15,19 @@
 """
 import ipaddress
 import re
+import socket
 import sys
 import time
 import urllib.request
 
 # ============ 官方 IP 数据源（按优先级排序，越靠前质量越高）============
+# url 型：抓取网页/接口提取 IP；dns 型：解析优选域名的 A 记录
+# （这些优选域名的记录由社区站长实测维护，灰云直指筛好的 CF IP）
 SOURCES = [
     # IPDB 优选官方 IP（每小时更新，原项目数据源 ipdb 的新版 API 格式）
     {"name": "IPDB bestcf", "url": "https://ipdb.api.030101.xyz/?type=bestcf"},
+    # SIN 优选域名（站长实测维护，优先稳定性；CNAME 到 singgnetworkcdn）
+    {"name": "SIN 优选域名", "dns": "saas.sin.fan"},
     # 每 10 分钟测速的 Top 优选（纯文本，逗号分隔）
     {"name": "ip.164746.xyz Top10", "url": "https://ip.164746.xyz/ipTop10.html"},
     # CloudFlareYes 电信优选（纯文本）
@@ -33,6 +38,9 @@ SOURCES = [
     {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu"},
     # CloudFlareYes 三网（CM API 备用入口）
     {"name": "CloudFlareYes 三网", "url": "https://addressesapi.090227.xyz/CloudFlareYes"},
+    # 其他社区维护的优选域名（A 记录为站长筛选，已验证跨解析器一致、灰云）
+    {"name": "182682 优选域名", "dns": "cf.cloudflare.182682.xyz"},
+    {"name": "IPDB BestDomain", "dns": "bestcf.030101.xyz"},
     # 以下为 bestcf.pages.dev 导航站收录的优选源（多为三网实测）
     {"name": "vvhan 三网", "url": "https://bestcf.pages.dev/vvhan/ipv4.txt"},
     {"name": "NiREvil 三网", "url": "https://bestcf.pages.dev/nirevil/ipv4.txt"},
@@ -111,6 +119,12 @@ def fetch_text(url: str) -> str:
     raise last_err
 
 
+def resolve_dns_source(hostname: str) -> str:
+    """解析优选域名的 A 记录，返回换行分隔的 IP 文本（供统一提取）。"""
+    ips = sorted({ai[4][0] for ai in socket.getaddrinfo(hostname, None, socket.AF_INET)})
+    return "\n".join(ips)
+
+
 def _valid_public_ipv4(raw: str):
     """是公网 IPv4 且不属于 WARP 专用段，返回 ip 对象；否则 None。"""
     try:
@@ -156,7 +170,10 @@ def run_collection(sources, extract, label):
     ok_sources = 0
     for src in sources:
         try:
-            text = fetch_text(src["url"])
+            if "dns" in src:
+                text = resolve_dns_source(src["dns"])
+            else:
+                text = fetch_text(src["url"])
         except Exception as e:  # noqa: BLE001
             print(f"[跳过][{label}] {src['name']}: {type(e).__name__}: {e}")
             continue
