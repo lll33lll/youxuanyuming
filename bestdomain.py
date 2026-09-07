@@ -13,6 +13,11 @@
 - 支持 --dry-run 只打印计划不实际改动
 - 支持 --only 指定范围：all=全部 / official=官方域名(cf/cloudflare) / proxy=反代域名
 
+来源格式：
+- http(s):// 开头 → 抓取网页/接口提取 IP
+- dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
+- 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
+
 环境变量：
 - CF_API_TOKEN  必填：Cloudflare API 令牌（Zone.DNS Edit 权限）
 - CF_ZONE_NAME  选填：目标域名（默认 223226.xyz），按名字精确匹配，不会再用错 zone
@@ -22,6 +27,7 @@ import ipaddress
 import json
 import os
 import re
+import socket
 import sys
 import time
 import urllib.error
@@ -33,13 +39,14 @@ MANAGED_COMMENT = "managed-by:youxuanyuming"
 MAX_RECORDS = 50  # 每个域名的 A 记录上限
 TIMEOUT = 30
 
-# 域名 -> 配置。sources 里 http(s):// 开头则抓取，否则按本地文件读取；
+# 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns: 开头则解析 A 记录，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：测速 Top10 + 电信优选 + 微测网（初始部署时的三个源）
+    # 精选官方：测速 Top10 + SIN 优选域名 + 电信优选 + 微测网
     "cf": {
         "sources": [
             "https://ip.164746.xyz/ipTop10.html",
+            "dns:saas.sin.fan",
             "https://addressesapi.090227.xyz/ct",
             "https://www.wetest.vip/page/cloudflare/address_v4.html",
         ],
@@ -97,6 +104,10 @@ def cf(method: str, path: str, body=None):
 
 
 def fetch_text(source: str) -> str:
+    if source.startswith("dns:"):
+        # dns 型来源：解析优选域名的 A 记录（站长实测维护的记录）
+        ips = sorted({ai[4][0] for ai in socket.getaddrinfo(source[4:], None, socket.AF_INET)})
+        return "\n".join(ips)
     if source.startswith("http://") or source.startswith("https://"):
         req = urllib.request.Request(source, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
