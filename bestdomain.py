@@ -4,13 +4,14 @@
 从 IP 列表更新 Cloudflare DNS 的 A 记录（优选域名）。
 
 用法（在仓库根目录）：
-    CF_API_TOKEN=xxx CF_ZONE_NAME=223226.xyz python bestdomain.py [--dry-run]
+    CF_API_TOKEN=xxx CF_ZONE_NAME=223226.xyz python bestdomain.py [--dry-run] [--only all|official|proxy]
 
 安全设计：
 - 只管理自己创建的记录（按 DNS 记录 comment 识别），不会动你手工加的记录
 - 新列表少于 2 个 IP 时直接跳过该域名（数据源抽风也不会把你现有记录清空）
 - 每个域名的记录数量有上限，超出截断
 - 支持 --dry-run 只打印计划不实际改动
+- 支持 --only 指定范围：all=全部 / official=官方域名(cf/cloudflare) / proxy=反代域名
 
 环境变量：
 - CF_API_TOKEN  必填：Cloudflare API 令牌（Zone.DNS Edit 权限）
@@ -45,7 +46,7 @@ SUBDOMAIN_IP_SOURCES = {
         ],
         "cf_only": True,
     },
-    # 全量官方：本仓库采集的合并列表（15 个数据源）
+    # 全量官方：本仓库采集的合并列表（18 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
     # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
     "proxy": {"sources": ["proxy.txt"], "cf_only": False},
@@ -193,9 +194,30 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
         time.sleep(0.2)
 
 
+def select_subdomains(scope: str):
+    """按范围挑选要更新的子域名：all=全部 / official=官方(cf_only) / proxy=反代。"""
+    if scope == "all":
+        return dict(SUBDOMAIN_IP_SOURCES)
+    if scope == "official":
+        return {k: v for k, v in SUBDOMAIN_IP_SOURCES.items() if v.get("cf_only", True)}
+    if scope == "proxy":
+        return {k: v for k, v in SUBDOMAIN_IP_SOURCES.items() if not v.get("cf_only", True)}
+    raise CFError(f"未知范围: {scope}（可选 all/official/proxy）")
+
+
 def main() -> int:
-    args = [a for a in sys.argv[1:] if not a.startswith("-")]
-    dry_run = "--dry-run" in sys.argv or os.environ.get("DRY_RUN") == "1"
+    args = sys.argv[1:]
+    dry_run = "--dry-run" in args or os.environ.get("DRY_RUN") == "1"
+
+    # 范围参数：--only all/official/proxy（--only=xxx 也支持），默认 all
+    scope = "all"
+    if "--only" in args:
+        i = args.index("--only")
+        if i + 1 < len(args):
+            scope = args[i + 1]
+    for a in args:
+        if a.startswith("--only="):
+            scope = a.split("=", 1)[1]
 
     token = os.environ.get("CF_API_TOKEN", "").strip()
     if not token:
@@ -204,8 +226,10 @@ def main() -> int:
     zone_name = os.environ.get("CF_ZONE_NAME", "223226.xyz").strip().rstrip(".")
 
     try:
+        targets = select_subdomains(scope)
+        print(f"本次范围: {scope} -> {', '.join(targets)}")
         zone_id = get_zone_id(zone_name)
-        for subdomain, cfg in SUBDOMAIN_IP_SOURCES.items():
+        for subdomain, cfg in targets.items():
             update_subdomain(zone_id, zone_name, subdomain, cfg["sources"], dry_run,
                              cf_only=cfg.get("cf_only", True))
             time.sleep(0.5)

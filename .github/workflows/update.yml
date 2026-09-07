@@ -2,8 +2,9 @@ name: 采集优选IP并更新DNS
 
 on:
   schedule:
-    # 两条 cron 错开 90 分钟，合起来 = 每 1.5 小时一次（北京时间 08:17/09:47/11:17/12:47...）
+    # :17 批次 = 官方+反代全量（官方池 cf/cloudflare 每 3 小时换新）
     - cron: '17 0,3,6,9,12,15,18,21 * * *'
+    # :47 批次 = 仅反代（反代池 proxy 每 1.5 小时换新）
     - cron: '47 1,4,7,10,13,16,19,22 * * *'
   workflow_dispatch:
     inputs:
@@ -12,6 +13,15 @@ on:
         required: false
         default: false
         type: boolean
+      scope:
+        description: '范围'
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - official
+          - proxy
 
 # 防止上一次还没跑完下一次又启动
 concurrency:
@@ -34,8 +44,23 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: 确定本次范围
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # 定时触发：按触发本任务的 cron 表达式区分（:47 的批次只跑反代）
+            case "${{ github.event.schedule }}" in
+              47*) SCOPE=proxy ;;
+              *)   SCOPE=all ;;
+            esac
+          else
+            SCOPE="${{ inputs.scope }}"
+          fi
+          [ -z "$SCOPE" ] && SCOPE=all
+          echo "本次范围: $SCOPE"
+          echo "SCOPE=$SCOPE" >> "$GITHUB_ENV"
+
       - name: 采集优选IP
-        run: python collect_ips.py
+        run: python collect_ips.py "$SCOPE"
 
       - name: 提交 ip.txt / proxy.txt
         run: |
@@ -43,7 +68,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add ip.txt proxy.txt
-            git commit -m "chore: 更新优选IP列表 $(date -u '+%Y-%m-%d %H:%M') UTC"
+            git commit -m "chore: 更新优选IP列表 [$SCOPE] $(date -u '+%Y-%m-%d %H:%M') UTC"
             git push
           else
             echo "ip.txt / proxy.txt 无变化，跳过提交"
@@ -59,4 +84,4 @@ jobs:
             echo "::warning::未配置 CF_API_TOKEN（仓库 Settings → Secrets and variables → Actions），本次只采集不更新 DNS，配置好后的下个周期自动生效"
             exit 0
           fi
-          python bestdomain.py
+          python bestdomain.py --only "$SCOPE"
