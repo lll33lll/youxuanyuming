@@ -36,17 +36,16 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：IPDB 每小时优选 + 测速 Top10 + 电信优选 + 微测网
+    # 精选官方：测速 Top10 + 电信优选 + 微测网（初始部署时的三个源）
     "cf": {
         "sources": [
-            "https://ipdb.api.030101.xyz/?type=bestcf",
             "https://ip.164746.xyz/ipTop10.html",
             "https://addressesapi.090227.xyz/ct",
             "https://www.wetest.vip/page/cloudflare/address_v4.html",
         ],
         "cf_only": True,
     },
-    # 全量官方：本仓库采集的合并列表（18 个数据源）
+    # 全量官方：本仓库采集的合并列表（16 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
     # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
     "proxy": {"sources": ["proxy.txt"], "cf_only": False},
