@@ -15,6 +15,7 @@
 
 来源格式：
 - http(s):// 开头 → 抓取网页/接口提取 IP
+- static: 开头 → 固定 IP 列表（逗号分隔）
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
 - dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
@@ -40,15 +41,18 @@ MANAGED_COMMENT = "managed-by:youxuanyuming"
 MAX_RECORDS = 50  # 每个域名的 A 记录上限
 TIMEOUT = 30
 
-# 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi: 开头则解析 A 记录，否则按本地文件读取；
+# 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：【临时测试模式】只保留 SIN 优选域名（多视角全量解析），以下三个源暂时移除（测试完加回）
+    # 精选官方：【临时测试模式】只保留 SIN 优选域名，以下三个源暂时移除（测试完加回）
     #   https://ip.164746.xyz/ipTop10.html
     #   https://addressesapi.090227.xyz/ct
     #   https://www.wetest.vip/page/cloudflare/address_v4.html
+    # static = 多视角枚举到的 saas.sin.fan 全部已知 IP（海外对 + 中国轮换池），测试期间保持稳定；
+    # dns-multi 继续自动发现新出现的记录
     "cf": {
         "sources": [
+            "static:162.159.130.234,162.159.135.234,172.64.152.5,172.64.156.171,172.64.229.10,172.64.229.66,172.64.229.235",
             "dns-multi:saas.sin.fan",
         ],
         "cf_only": True,
@@ -147,6 +151,9 @@ def resolve_dns_multi(hostname: str) -> str:
 
 
 def fetch_text(source: str) -> str:
+    if source.startswith("static:"):
+        # static 型来源：固定 IP 列表（逗号分隔），用于测试或锁定特定 IP
+        return "\n".join(x.strip() for x in source[len("static:"):].split(",") if x.strip())
     if source.startswith("dns-multi:"):
         # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
         return resolve_dns_multi(source[len("dns-multi:"):])
