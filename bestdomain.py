@@ -46,15 +46,14 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：测速 Top10 + SIN 优选域名（static 锁定多视角全部 9 个已知 IPv4 + dns-multi 自动发现新记录）+ 电信优选 + 微测网数据镜像
-    # 注：wetest.vip 原站 2026-09-07 改版为 JS 渲染抓不到了，换用其数据镜像（gshtwy/CF-DNS-Clone，同为 wetest 数据）
+    # 精选官方：测速 Top10 + SIN 优选域名（static 锁定多视角全部 9 个已知 IPv4 + dns-multi 自动发现新记录）+ 电信优选
+    # 注：wetest.vip 原站 2026-09-07 改版为 JS 渲染抓不到了，已移除该源
     "cf": {
         "sources": [
             "https://ip.164746.xyz/ipTop10.html",
             "static:162.159.130.234,162.159.135.234,172.64.152.5,172.64.156.171,172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
             "dns-multi:saas.sin.fan",
             "https://addressesapi.090227.xyz/ct",
-            "https://raw.githubusercontent.com/gshtwy/CF-DNS-Clone/refs/heads/main/wetest-cloudflare-v4.txt",
         ],
         "cf_only": True,
     },
