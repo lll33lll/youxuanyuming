@@ -10,7 +10,7 @@
 
 特点：
 - 零第三方依赖（只用标准库），GitHub Actions 上不需要 pip install
-- 单个数据源挂了自动跳过；官方源全挂则报错退出且不动旧文件
+- 单个数据源挂了自动跳过；源大面积异常时保留旧文件不动（防池子被砍残）
 - 反代源里只保留 "IP:443" 格式的行（DNS 优选域名只对 443 端口有意义）
 - 排除 WARP 专用网段（162.159.192.0/21 是 WARP/MASQUE 端点，
   不能当普通优选 IP 用；bestcf.pages.dev 的文件头一行就是它）
@@ -40,9 +40,6 @@ SOURCES = [
     {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu"},
     # CloudFlareYes 三网（CM API 备用入口）
     {"name": "CloudFlareYes 三网", "url": "https://addressesapi.090227.xyz/CloudFlareYes"},
-    # 其他社区维护的优选域名（A 记录为站长筛选，已验证跨解析器一致、灰云）
-    {"name": "182682 优选域名", "dns": "cf.cloudflare.182682.xyz"},
-    {"name": "IPDB BestDomain", "dns": "bestcf.030101.xyz"},
     # 以下为 bestcf.pages.dev 导航站收录的优选源（多为三网实测）
     {"name": "vvhan 三网", "url": "https://bestcf.pages.dev/vvhan/ipv4.txt"},
     {"name": "NiREvil 三网", "url": "https://bestcf.pages.dev/nirevil/ipv4.txt"},
@@ -166,7 +163,7 @@ def extract_proxy_ips(text: str, port443_only: bool = False):
 
 
 def run_collection(sources, extract, label):
-    """跑一组数据源，返回按优先级去重后的 IP 列表。"""
+    """跑一组数据源，返回 (按优先级去重后的 IP 列表, 可用源数量)。"""
     merged = []
     seen = set()
     ok_sources = 0
@@ -191,7 +188,7 @@ def run_collection(sources, extract, label):
         print(f"[OK][{label}] {src['name']}: 抓到 {len(ips)} 个（新增 {len(new)}）")
         time.sleep(1)
     print(f"[{label}] 合计：{ok_sources}/{len(sources)} 个源可用，去重后 {len(merged)} 个 IP")
-    return merged
+    return merged, ok_sources
 
 
 def write_file(path: str, ips, cap: int):
@@ -200,6 +197,11 @@ def write_file(path: str, ips, cap: int):
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(final) + "\n")
     print(f"已写入 {path}（{len(final)} 个 IP，上限 {cap}）")
+
+
+def min_sources_ok(n_sources: int) -> int:
+    """一组源至少要有多少个可用才认为采集正常（防网络/源大面积异常时砍残池子）。"""
+    return max(2, n_sources // 4)
 
 
 def main() -> int:
@@ -211,20 +213,22 @@ def main() -> int:
     rc = 0
 
     if scope in ("all", "official"):
-        official = run_collection(SOURCES, lambda t, s: extract_ips(t), "官方")
-        if official:
+        official, ok = run_collection(SOURCES, lambda t, s: extract_ips(t), "官方")
+        if ok >= min_sources_ok(len(SOURCES)) and len(official) >= 10:
             write_file("ip.txt", official, MAX_IPS)
         else:
-            print("错误：官方优选一个 IP 都没抓到，保留旧 ip.txt 不动，退出码 1")
+            print(f"错误：官方源大面积异常（{ok}/{len(SOURCES)} 可用，仅 {len(official)} 个 IP），"
+                  "保留旧 ip.txt 不动，退出码 1")
             rc = 1
 
     if scope in ("all", "proxy"):
-        proxies = run_collection(
+        proxies, ok = run_collection(
             PROXY_SOURCES, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), "反代")
-        if proxies:
+        if ok >= min_sources_ok(len(PROXY_SOURCES)) and len(proxies) >= 10:
             write_file("proxy.txt", proxies, MAX_PROXY_IPS)
         else:
-            print("[反代] 警告：一个反代 IP 都没抓到，保留旧 proxy.txt（不影响官方域名维护）")
+            print(f"[反代] 警告：反代源大面积异常（{ok}/{len(PROXY_SOURCES)} 可用，仅 {len(proxies)} 个 IP），"
+                  "保留旧 proxy.txt（不影响官方域名维护）")
 
     return rc
 
