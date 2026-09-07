@@ -4,8 +4,8 @@ on:
   schedule:
     # :17 批次 = 官方+反代全量（官方池 cf/cloudflare 每 3 小时换新）
     - cron: '17 0,3,6,9,12,15,18,21 * * *'
-    # :47 批次 = 仅反代（反代池 proxy 每 1.5 小时换新）
-    - cron: '47 1,4,7,10,13,16,19,22 * * *'
+    # :47 批次 = 仅反代（反代池 proxy 每 1 小时换新）
+    - cron: '47 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

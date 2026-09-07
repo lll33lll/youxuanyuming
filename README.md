@@ -7,7 +7,7 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 - **官方池**（`cf` / `cloudflare`）：每 **3 小时**换新（:17 批次）
-- **反代池**（`proxy`）：每 **1.5 小时**换新（:17 批次跑全量 + :47 批次只跑反代）
+- **反代池**（`proxy`）：每 **1 小时**换新（:17 批次跑全量 + 每小时 :47 批次只跑反代）
 
 每次运行：
 
@@ -19,7 +19,7 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 | --- | --- | --- |
 | `cf.223226.xyz` | [ip.164746.xyz](https://ip.164746.xyz/ipTop10.html) Top10 + [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现）+ [CloudFlareYes 电信](https://addressesapi.090227.xyz/ct)（wetest 原站改版 JS 渲染后已移除） | 官方网段·精选，每 3 小时 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（16 源候选池 → 三网质量打分 + 存活验证，取 Top 50） | 官方网段·质量优选，每 3 小时 |
-| `proxy.223226.xyz` | 本仓库 `proxy.txt`（15 源候选池 → 三网质量打分 + 存活验证，取 Top 50；Xgonce/gaoji/MJZ/Xiaobei09 带实测数值） | **第三方反代节点**，每 1.5 小时 |
+| `proxy.223226.xyz` | 本仓库 `proxy.txt`（15 源候选池 → 三网质量打分 + 存活验证，取 Top 50；Xgonce/gaoji/MJZ/Xiaobei09 带实测数值） | **第三方反代节点**，每 1 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
@@ -80,7 +80,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 
 ## 常见问题
 
-- **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1.5 小时（再叠加 `47 1,4,7,...` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1 小时（每小时 `47 * * * *` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
 - **池子的 IP 怎么选出来的？**（cf/cloudflare/proxy 通用）三网质量打分制：三网覆盖标签（电信/联通/移动每家 +20 分）+ 实测延迟/速度（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源带的 ms/mb 数值，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ 写入前 TCP 443 存活验证（死 IP 不入库），总分排序取 Top 50。注：GitHub runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A/AAAA 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；源大面积异常（可用源少于 1/4 或结果少于 10 个）时保留旧文件不动；两个域名各自的有效 IP 少于 2 个时会跳过更新，不会清空。
@@ -105,7 +105,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 数据源扩充到 24 个（官方 15 + 反代 9，参考 bestcf.pages.dev 导航站收录），并排除 WARP 专用网段（162.159.192.0/21，bestcf.pages.dev 文件头的 162.159.198.1 是 WARP 端点，不能当优选 IP）
 - 新增「优选域名 A 记录采集」源型（dns 型源）：saas.sin.fan（已验证为站长实测维护的灰云记录）
 - 新增「多视角 DNS 采集」源型（dns-multi 型源）与「固定 IP 列表」源型（static 型源）
-- 同步频率拆分：官方池每 3 小时、反代池每 1.5 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
+- 同步频率拆分：官方池每 3 小时、反代池每 1 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时不写文件，防止网络故障时把池子砍残
 - `cf` 域名源定型：ipTop10 + SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现）+ CloudFlareYes 电信（wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
 - `ip.txt` 与 `proxy.txt` 筛选改为**三网质量打分制**：三网覆盖标签 + 实测延迟/速度数值（uouin/Xgonce CSV/gaoji/MJZ/Xiaobei09）+ 多源共识 + TCP 443 存活验证，综合排序取 Top 50（取代按来源优先级截取；uouin 的 HTML 表格按 `<tr>` 行块解析出运营商/延迟/带宽，Xgonce 的 CSV 转标准行格式）；反代源扩充到 15 个（新增 Xgonce 实测 CSV、YuTian、Mia、洛璃、天诚、CM IP库）
