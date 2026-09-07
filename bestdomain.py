@@ -16,6 +16,7 @@
 来源格式：
 - http(s):// 开头 → 抓取网页/接口提取 IP
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
+- dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
 
 环境变量：
@@ -39,16 +40,16 @@ MANAGED_COMMENT = "managed-by:youxuanyuming"
 MAX_RECORDS = 50  # 每个域名的 A 记录上限
 TIMEOUT = 30
 
-# 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns: 开头则解析 A 记录，否则按本地文件读取；
+# 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi: 开头则解析 A 记录，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：【临时测试模式】只保留 SIN 优选域名，以下三个源暂时移除（测试完加回）
+    # 精选官方：【临时测试模式】只保留 SIN 优选域名（多视角全量解析），以下三个源暂时移除（测试完加回）
     #   https://ip.164746.xyz/ipTop10.html
     #   https://addressesapi.090227.xyz/ct
     #   https://www.wetest.vip/page/cloudflare/address_v4.html
     "cf": {
         "sources": [
-            "dns:saas.sin.fan",
+            "dns-multi:saas.sin.fan",
         ],
         "cf_only": True,
     },
@@ -74,6 +75,15 @@ _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
 # WARP 专用网段（WARP/MASQUE 端点不服务普通 SNI 代理，不能当优选 IP 用）
 WARP_V4_RANGES = ["162.159.192.0/21"]
 _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
+
+# 多解析器 DoH 端点（含国内视角；GeoDNS 服务的优选域名在不同视角会返回不同记录）
+DOH_ENDPOINTS = [
+    "https://dns.alidns.com/resolve",        # 阿里 DNS（中国视角）
+    "https://doh.pub/resolve",               # 腾讯 DNSPod（中国视角）
+    "https://dns.google/resolve",            # Google（海外视角）
+    "https://cloudflare-dns.com/dns-query",  # Cloudflare（海外视角）
+]
+DOH_ROUNDS = 6  # 每个端点的查询轮数（部分视角的记录会轮换，多查几轮才能收全）
 
 
 class CFError(Exception):
@@ -103,7 +113,43 @@ def cf(method: str, path: str, body=None):
     return payload.get("result")
 
 
+def resolve_dns_multi(hostname: str) -> str:
+    """多解析器（含国内 DoH）解析 A 记录并合并去重。
+
+    适用于 GeoDNS 优选域名：不同地区视角返回不同记录（如 saas.sin.fan
+    海外视角 162.159.130/135.234、中国视角轮换 172.64.229.x 等），
+    多端点多轮查询才能收集完整 IP 池。
+    """
+    ips = set()
+    try:  # 本地解析器
+        ips.update(ai[4][0] for ai in socket.getaddrinfo(hostname, None, socket.AF_INET))
+    except Exception:  # noqa: BLE001
+        pass
+    for endpoint in DOH_ENDPOINTS:
+        fails = 0
+        for _ in range(DOH_ROUNDS):
+            try:
+                req = urllib.request.Request(
+                    f"{endpoint}?name={hostname}&type=A",
+                    headers={"Accept": "application/dns-json",
+                             "User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read().decode("utf-8", "replace"))
+                for ans in data.get("Answer", []):
+                    if ans.get("type") == 1:
+                        ips.add(str(ans["data"]))
+                fails = 0
+            except Exception:  # noqa: BLE001
+                fails += 1
+                if fails >= 2:  # 连续失败视为端点不可达，跳到下一个
+                    break
+    return "\n".join(sorted(ips))
+
+
 def fetch_text(source: str) -> str:
+    if source.startswith("dns-multi:"):
+        # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
+        return resolve_dns_multi(source[len("dns-multi:"):])
     if source.startswith("dns:"):
         # dns 型来源：解析优选域名的 A 记录（站长实测维护的记录）
         ips = sorted({ai[4][0] for ai in socket.getaddrinfo(source[4:], None, socket.AF_INET)})
