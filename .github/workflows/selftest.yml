@@ -1,0 +1,39 @@
+name: 自检（用完即删）
+
+# 推送本文件即自动触发：验证 cf 多视角全量解析（dns-multi:saas.sin.fan）
+on:
+  push:
+    paths:
+      - '.github/workflows/selftest.yml'
+
+permissions:
+  actions: write
+
+jobs:
+  trigger-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 触发正式 update.yml（official 范围）并等待结果
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          prev_id=$(gh run list --workflow=update.yml --limit 1 --json databaseId --jq '.[0].databaseId')
+          gh workflow run update.yml --ref main -f scope=official
+          echo "已触发（official 范围），等待完成..."
+          for i in $(seq 1 30); do
+            sleep 10
+            cur=$(gh run list --workflow=update.yml --limit 1 --json databaseId,status,conclusion --jq '.[0] | "\(.databaseId) \(.status) \(.conclusion)"')
+            id=$(echo "$cur" | awk '{print $1}')
+            status=$(echo "$cur" | awk '{print $2}')
+            conclusion=$(echo "$cur" | awk '{print $3}')
+            if [ "$id" != "$prev_id" ] && [ "$status" = "completed" ]; then
+              echo "update.yml 运行结果: $conclusion"
+              [ "$conclusion" = "success" ] && exit 0
+              exit 1
+            fi
+          done
+          echo "等待超时"
+          exit 1
