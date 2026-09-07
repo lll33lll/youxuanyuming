@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-从 IP 列表更新 Cloudflare DNS 的 A 记录（优选域名）。
+从 IP 列表更新 Cloudflare DNS 的 A/AAAA 记录（优选域名）。
 
 用法（在仓库根目录）：
     CF_API_TOKEN=xxx CF_ZONE_NAME=223226.xyz python bestdomain.py [--dry-run] [--only all|official|proxy]
@@ -19,6 +19,8 @@
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
 - dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
+
+IPv4 进 A 记录；IPv6（限 Cloudflare 官方网段）进 AAAA 记录，双轨分开维护。
 
 环境变量：
 - CF_API_TOKEN  必填：Cloudflare API 令牌（Zone.DNS Edit 权限）
@@ -38,17 +40,17 @@ import urllib.request
 
 API_BASE = "https://api.cloudflare.com/client/v4"
 MANAGED_COMMENT = "managed-by:youxuanyuming"
-MAX_RECORDS = 50  # 每个域名的 A 记录上限
+MAX_RECORDS = 50  # 每个域名的记录上限（A 与 AAAA 各自计算）
 TIMEOUT = 30
 
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：测速 Top10 + SIN 优选域名（static 锁定多视角枚举的全部已知 IP + dns-multi 自动发现新记录）+ 电信优选 + 微测网
+    # 精选官方：测速 Top10 + SIN 优选域名（static 锁定多视角枚举的全部已知 IP，v4+v6 + dns-multi 自动发现）+ 电信优选 + 微测网
     "cf": {
         "sources": [
             "https://ip.164746.xyz/ipTop10.html",
-            "static:162.159.130.234,162.159.135.234,172.64.152.5,172.64.156.171,172.64.229.10,172.64.229.66,172.64.229.235",
+            "static:162.159.130.234,162.159.135.234,172.64.152.5,172.64.156.171,172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235,2606:4700:ff00:262e:715d:8689:5b7a:97b5",
             "dns-multi:saas.sin.fan",
             "https://addressesapi.090227.xyz/ct",
             "https://www.wetest.vip/page/cloudflare/address_v4.html",
@@ -77,6 +79,13 @@ _CF_NETS = tuple(ipaddress.ip_network(n) for n in CF_V4_RANGES)
 # WARP 专用网段（WARP/MASQUE 端点不服务普通 SNI 代理，不能当优选 IP 用）
 WARP_V4_RANGES = ["162.159.192.0/21"]
 _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
+
+# Cloudflare 官方 IPv6 网段（官方清单：https://www.cloudflare.com/ips-v6）
+CF_V6_RANGES = [
+    "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+    "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+]
+_CF6_NETS = tuple(ipaddress.ip_network(n) for n in CF_V6_RANGES)
 
 # 多解析器 DoH 端点（含国内视角；GeoDNS 服务的优选域名在不同视角会返回不同记录）
 DOH_ENDPOINTS = [
@@ -150,7 +159,7 @@ def resolve_dns_multi(hostname: str) -> str:
 
 def fetch_text(source: str) -> str:
     if source.startswith("static:"):
-        # static 型来源：固定 IP 列表（逗号分隔），用于测试或锁定特定 IP
+        # static 型来源：固定 IP 列表（逗号分隔，可含 v4 与 v6），用于测试或锁定特定 IP
         return "\n".join(x.strip() for x in source[len("static:"):].split(",") if x.strip())
     if source.startswith("dns-multi:"):
         # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
@@ -186,6 +195,22 @@ def extract_ips(text: str, cf_only: bool = True):
     return out
 
 
+def extract_ips6(text: str):
+    """从文本中提取 Cloudflare 官方网段的 IPv6（用于 AAAA 记录）。
+
+    按空白/逗号切分后逐个用 ipaddress 校验，天然免疫误匹配。
+    """
+    out = []
+    for token in re.split(r"[\s,]+", text):
+        try:
+            ip = ipaddress.ip_address(token)
+        except ValueError:
+            continue
+        if ip.version == 6 and token not in out and any(ip in net for net in _CF6_NETS):
+            out.append(token)
+    return out
+
+
 def get_zone_id(zone_name: str) -> str:
     q = urllib.parse.urlencode({"name": zone_name, "status": "active", "per_page": 50})
     zones = cf("GET", f"/zones?{q}")
@@ -202,8 +227,8 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
                      dry_run: bool, cf_only: bool = True):
     fqdn = zone_name if subdomain == "@" else f"{subdomain}.{zone_name}"
 
-    # 1. 取新 IP 列表（多来源合并去重）
-    desired = []
+    # 1. 取新 IP 列表（多来源合并去重；IPv4 进 A 记录，IPv6 进 AAAA 记录）
+    desired, desired6 = [], []
     for src in sources:
         try:
             text = fetch_text(src)
@@ -213,43 +238,57 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
         for ip in extract_ips(text, cf_only=cf_only):
             if ip not in desired:
                 desired.append(ip)
+        for ip in extract_ips6(text):
+            if ip not in desired6:
+                desired6.append(ip)
     desired = sorted(desired[:MAX_RECORDS], key=lambda s: tuple(int(p) for p in s.split(".")))
+    desired6 = sorted(desired6[:MAX_RECORDS])
 
-    if len(desired) < 2:
-        print(f"[跳过] {fqdn}: 有效 IP 只有 {len(desired)} 个(<2)，为防误清空保留现有记录")
+    if len(desired) + len(desired6) < 2:
+        print(f"[跳过] {fqdn}: 有效 IP 只有 {len(desired)}(v4)+{len(desired6)}(v6) 个(<2)，"
+              "为防误清空保留现有记录")
         return
 
-    # 2. 查现有 A 记录（区分“本脚本管理的”和“用户手工加的”）
-    q = urllib.parse.urlencode({"type": "A", "name": fqdn, "per_page": 100})
-    existing = cf("GET", f"/zones/{zone_id}/dns_records?{q}")
-    managed = [r for r in existing if r.get("comment") == MANAGED_COMMENT]
-    existing_contents = {r["content"] for r in existing}
+    def _diff(record_type, want):
+        """对比某类型的现有记录与目标列表，返回 (待删, 待加)。只动自己托管的记录。"""
+        q = urllib.parse.urlencode({"type": record_type, "name": fqdn, "per_page": 100})
+        existing = cf("GET", f"/zones/{zone_id}/dns_records?{q}")
+        managed = [r for r in existing if r.get("comment") == MANAGED_COMMENT]
+        contents = {r["content"] for r in existing}
+        to_del = [r for r in managed if r["content"] not in want]
+        to_add = [ip for ip in want if ip not in contents]
+        return to_del, to_add
 
-    to_delete = [r for r in managed if r["content"] not in desired]
-    to_add = [ip for ip in desired if ip not in existing_contents]
+    to_delete, to_add = _diff("A", desired)
+    to_delete6, to_add6 = _diff("AAAA", desired6)
 
-    print(f"[{fqdn}] 目标 {len(desired)} 个 IP | 现有 {len(existing)} 条"
-          f"（托管 {len(managed)}）| 需删 {len(to_delete)} | 需加 {len(to_add)}")
-    if not to_delete and not to_add:
+    print(f"[{fqdn}] 目标 {len(desired)} 个 IPv4 + {len(desired6)} 个 IPv6 | "
+          f"需删 {len(to_delete)}(A)+{len(to_delete6)}(AAAA) | 需加 {len(to_add)}(A)+{len(to_add6)}(AAAA)")
+    if not (to_delete or to_add or to_delete6 or to_add6):
         print(f"[{fqdn}] 无变化")
         return
 
     if dry_run:
         for r in to_delete:
-            print(f"  将删除: {r['content']}")
+            print(f"  将删除: A {r['content']}")
+        for r in to_delete6:
+            print(f"  将删除: AAAA {r['content']}")
         for ip in to_add:
-            print(f"  将新增: {ip}")
+            print(f"  将新增: A {ip}")
+        for ip in to_add6:
+            print(f"  将新增: AAAA {ip}")
         print(f"[{fqdn}] dry-run 模式，未实际改动")
         return
 
-    # 3. 先加后删（保证任意时刻域名都有记录可解析）
-    for ip in to_add:
-        cf("POST", f"/zones/{zone_id}/dns_records", {
-            "type": "A", "name": fqdn, "content": ip,
-            "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
-        })
-        print(f"  已新增: {ip}")
-    for r in to_delete:
+    # 2. 先加后删（保证任意时刻域名都有记录可解析）
+    for rtype, ips in (("A", to_add), ("AAAA", to_add6)):
+        for ip in ips:
+            cf("POST", f"/zones/{zone_id}/dns_records", {
+                "type": rtype, "name": fqdn, "content": ip,
+                "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
+            })
+            print(f"  已新增: {rtype} {ip}")
+    for r in to_delete + to_delete6:
         cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
         print(f"  已删除: {r['content']}")
         time.sleep(0.2)
