@@ -1,6 +1,6 @@
 name: 自检（用完即删）
 
-# 推送本文件即自动触发：验证 cf 多视角全量解析（dns-multi:saas.sin.fan）
+# 推送本文件即自动触发：验证 cf static+dns-multi 全量 IP 模式
 on:
   push:
     paths:
