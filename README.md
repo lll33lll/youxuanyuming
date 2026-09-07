@@ -4,7 +4,7 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 ## 它做什么
 
-GitHub Actions **每 3 小时**自动：
+GitHub Actions **每 1.5 小时**自动：
 
 1. 从 **27 个**公开数据源抓取 IPv4（坏源自动跳过）：18 个官方 IP 源 + 9 个反代源；其中 3 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan) 等，站长实测维护）
 2. 去重、校验、限量后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；官方列表**只保留 Cloudflare 官方网段的 IP**（并排除 WARP 专用段）
@@ -73,7 +73,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 
 ## 常见问题
 
-- **多久更新一次？** 每 3 小时（UTC `17 */3 * * *`）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **多久更新一次？** 每 1.5 小时（两条 cron 错开 90 分钟：UTC `17 0,3,6,...` + `47 1,4,7,...`）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；两个域名各自的有效 IP 少于 2 个时会跳过更新、保留现有记录，不会清空。
 - **为什么有的来源抓到的 IP 会变少？** 官方域名（cf/cloudflare）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
@@ -95,6 +95,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增反代域名 `proxy.223226.xyz` 与 `proxy.txt`（IPDB bestproxy + gaoji.uk + LancelotRar，只取 443 端口），与官方域名分开维护
 - 数据源扩充到 24 个（官方 15 + 反代 9，参考 bestcf.pages.dev 导航站收录），并排除 WARP 专用网段（162.159.192.0/21，bestcf.pages.dev 文件头的 162.159.198.1 是 WARP 端点，不能当优选 IP）
 - 新增「优选域名 A 记录采集」源型（dns 型源）：saas.sin.fan、cf.cloudflare.182682.xyz、bestcf.030101.xyz（均已验证为站长实测维护的灰云记录）
+- 同步频率提升到每 1.5 小时（两条 cron 错开 90 分钟实现）
 
 ## 开源协议
 
