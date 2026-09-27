@@ -6,25 +6,32 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
-- **官方池**（`cf` / `cloudflare`）：每 **3 小时**换新（:17 批次）
-- **反代池**（`proxy`）：每 **1 小时**换新（:17 批次跑全量 + 每小时 :47 批次只跑反代）
+- **官方池**（`cf`）：每 **3 小时**换新（:17 批次）
+- **反代池**（`proxy` + 三网 `ct`/`cu`/`cmcc`）：每 **1 小时**换新（:17 批次跑全量 + 每小时 :47 批次只跑反代）
 
 每次运行：
 
-1. 按 40 个公开数据源抓取 IPv4（坏源自动跳过）：23 个官方 IP 源 + 17 个反代源；其中 1 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan)，站长实测维护）
-2. 去重、校验后写入 `ip.txt`（官方）和 `proxy.txt`（反代）并提交到仓库；**两个池子都按三网质量打分排序取前 50**：三网覆盖标签（电信/联通/移动，每家 +20）+ 实测延迟/速度数值（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源自带，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ TCP 443 存活验证（死 IP 不入库）；官方列表只保留 Cloudflare 官方网段（排除 WARP 专用段）；源大面积异常时保留旧文件不写（防池子被砍残）
-3. 调 Cloudflare API，把下面三个域名的 A/AAAA 记录同步成最新优选 IP（**灰云 / DNS-only**）：
+1. 按 51 个公开数据源抓取 IPv4（坏源自动跳过）：23 个官方 IP 源 + 17 个反代源 + 11 个三网反代源；其中 1 个官方源通过 DNS 解析优选域名的 A 记录获取（[saas.sin.fan](https://saas.sin.fan)，站长实测维护）
+2. 去重、校验后写入 `ip.txt`（官方）、`proxy.txt`（反代）和 `proxy-ct/cu/cmcc.txt`（三网反代）并提交到仓库；**两个池子都按三网质量打分排序取前 50**：三网覆盖标签（电信/联通/移动，每家 +20）+ 实测延迟/速度数值（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源自带，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ TCP 443 存活验证（死 IP 不入库）；官方列表只保留 Cloudflare 官方网段（排除 WARP 专用段）；源大面积异常时保留旧文件不写（防池子被砍残）
+3. 调 Cloudflare API，把下面五个域名的 A/AAAA 记录同步成最新优选 IP（**灰云 / DNS-only**）：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
 | `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 5 条 + [saas.sin.fan](https://saas.sin.fan)（仅电信视角采集）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 | 官方网段·精选，每 3 小时 |
-| `cloudflare.223226.xyz` | 本仓库 `ip.txt`（23 源候选池 → 三网质量打分 + 存活验证，取 Top 50） | 官方网段·质量优选，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（17 源候选池 → 三网质量打分 + 存活验证，取 Top 50；Xgonce/gaoji/MJZ/Xiaobei09 带实测数值） | **第三方反代节点**，每 1 小时 |
+| `ct.223226.xyz` | 本仓库 `proxy-ct.txt`（三网反代·**电信向**：MJZ 电信 + LZ 电信/双网全量） | **第三方反代节点·电信**，每 1 小时 |
+| `cu.223226.xyz` | 本仓库 `proxy-cu.txt`（三网反代·**联通向**：MJZ 联通 + LZ 双网全量） | **第三方反代节点·联通**，每 1 小时 |
+| `cmcc.223226.xyz` | 本仓库 `proxy-cmcc.txt`（三网反代·**移动向**：gaoji/svip-s 陕西移动实测） | **第三方反代节点·移动**，每 1 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
 `ip.txt` 的候选数据源（23 个，合并去重后按三网质量打分取 Top 50）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、**090227 实时三网 API**（每请求实时生成）、vvhan 三网、NiREvil 三网、微测网 HTML + 静态镜像（2026-09-27 复核恢复）、cfyes 镜像、ircf 镜像、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com + 静态镜像（带电信实测延迟/速度数值）。
 `proxy.txt` 的候选数据源（17 个，合并去重后按三网质量打分取 Top 50，只取 443 端口）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测，带速度）、gaoji.uk 移动实测（带延迟/速度）、LZ 联通实测、Xiaobei09 稳定版 + 全量版（600+ 条，带地区/速度标注）、**Xgonce 实测库**（每 6 小时，CSV 自带速度+TCP/TLS 延迟）、YuTian、Mia、洛璃、天诚 + 天诚2/3、S5公益、Laziji、CM IP库（万级大池子）。
+
+`proxy-ct.txt` / `proxy-cu.txt` / `proxy-cmcc.txt`（三网反代，来源为 bestcf.pages.dev 导航站「MJZ 卡片」收录的分运营商实测源；只取 443 端口，打分取 Top 50）：
+- **电信（ct）**：MJZ 电信（每 45 分钟）、LZ 电信 + LZ 电信联通双网（每 2 小时，四川）
+- **联通（cu）**：MJZ 联通（每 45 分钟）、LZ 电信联通双网
+- **移动（cmcc）**：gaoji.uk / svip-s（陕西移动实测；R2 与 GitHub 双入口）
 
 来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。已排查并排除的伪优选域名：cf.877774.xyz（CNAME 蹭 www.wto.org 橙云记录）、youxuan.cf.090227.xyz（轮换 CNAME 到 Coinbase/Udacity CDN）、cf.3666888.xyz（GeoDNS 分地区，海外视角拿不到国内记录）。
 
@@ -57,17 +64,19 @@ Fork 的 Actions 默认禁用。打开仓库 **Actions** 标签页，点绿色�
 ```bash
 nslookup -type=A cf.223226.xyz     # IPv4（A 记录）
 nslookup -type=AAAA cf.223226.xyz  # IPv6（AAAA 记录）
-nslookup cloudflare.223226.xyz
 nslookup proxy.223226.xyz
+nslookup ct.223226.xyz
+nslookup cu.223226.xyz
+nslookup cmcc.223226.xyz
 ```
 
-cf/cloudflare 会解析出一批 104.x / 162.159.x / 172.64.x 的官方网段地址；`proxy.223226.xyz` 解析出的是第三方反代 IP。
+cf 会解析出一批 172.64.229.x 的官方网段地址；`proxy.223226.xyz` / `ct` / `cu` / `cmcc` 解析出的是第三方反代 IP（三网版按运营商分池）。
 
 ## 怎么用
 
 在代理客户端（v2rayN / Clash Meta / Shadowrocket / sing-box 等）里：
 
-- **address / server** 填 `cf.223226.xyz`、`cloudflare.223226.xyz`（官方 IP）或 `proxy.223226.xyz`（反代 IP，需自担风险）
+- **address / server** 填 `cf.223226.xyz`（官方 IP）或 `proxy.223226.xyz` / `ct` / `cu` / `cmcc` 三网反代域名（反代 IP，按自己宽带运营商选，需自担风险）
 - **SNI / Host / peer** 填你真正走 CF 的域名（例如你自己的 Worker、Pages 或其它橙云域名）
 
 ## 手动运行 / 试运行
@@ -80,15 +89,15 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 
 ## 常见问题
 
-- **多久更新一次？** 官方池（cf/cloudflare）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1 小时（每小时 `47 * * * *` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
-- **池子的 IP 怎么选出来的？**（cf/cloudflare/proxy 通用）三网质量打分制：三网覆盖标签（电信/联通/移动每家 +20 分）+ 实测延迟/速度（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源带的 ms/mb 数值，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ 写入前 TCP 443 存活验证（死 IP 不入库），总分排序取 Top 50。注：GitHub runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注。
+- **多久更新一次？** 官方池（cf）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy + 三网 ct/cu/cmcc）每 1 小时（每小时 `47 * * * *` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **池子的 IP 怎么选出来的？**（cf/proxy/ct/cu/cmcc 通用）三网质量打分制：三网覆盖标签（电信/联通/移动每家 +20 分）+ 实测延迟/速度（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源带的 ms/mb 数值，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ 写入前 TCP 443 存活验证（死 IP 不入库），总分排序取 Top 50。注：GitHub runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A/AAAA 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；源大面积异常（可用源少于 1/4 或结果少于 10 个）时保留旧文件不动；两个域名各自的有效 IP 少于 2 个时会跳过更新，不会清空。
-- **为什么有的来源抓到的 IP 会变少？** 官方域名（cf/cloudflare）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
+- **为什么有的来源抓到的 IP 会变少？** 官方域名（cf）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy/ct/cu/cmcc）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
 - **IPv6 支持吗？** 支持（IPv6 会进 AAAA 记录，与 A 记录分开维护）；当前配置未启用 v6 IP。
 - **反代 IP 是什么？** 第三方架设的中转服务器，帮你把流量转发到 Cloudflare。速度可能更快，但流量会经过陌生人的服务器，请自行权衡（见上方风险须知）。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
-- **ip.txt 是什么？** 三网质量打分 Top 50（上限 50 个），也作为 `cloudflare` 域名的数据源，可以通过
+- **ip.txt 是什么？** 三网质量打分 Top 50（上限 50 个），可以通过
   `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
 
 ## 相对上游的改动
@@ -111,6 +120,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - `cf` 域名源定型：**仅 172.64.229.x 段**（电信）——static 锁定 5 条（229 段）+ saas.sin.fan（仅电信 ECS 视角采集，联通/移动视角不查不产）+ ct.877774.xyz 批量（8 条）；`only_ranges` 白名单保留（任何来源的非 229 段一律拒绝）；ECS 采样 4 轮/端点/视角（压掉池子轮换漏采抖动）；2026-09-27 迭代路径：撤 ipTop10/CloudFlareYes → 只留 saas.sin.fan → 收紧 229 段 → 三网全池实验 → QMS 三网源 → 三网全收 + 视角级过滤实验 → **最终定型：纯 229 段（仅电信视角）**（wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
 - `ip.txt` 与 `proxy.txt` 筛选改为**三网质量打分制**：三网覆盖标签 + 实测延迟/速度数值（uouin/Xgonce CSV/gaoji/MJZ/Xiaobei09）+ 多源共识 + TCP 443 存活验证，综合排序取 Top 50（取代按来源优先级截取；uouin 的 HTML 表格按 `<tr>` 行块解析出运营商/延迟/带宽，Xgonce 的 CSV 转标准行格式）；反代源扩充到 15 个（新增 Xgonce 实测 CSV、YuTian、Mia、洛璃、天诚、CM IP库）
 - **数据源体检与增补（2026-09-27）**：全量复核 40 个源——移除 LancelotRar（旧链接失效，其文件已改版为地区扫描数据）；微测网恢复（HTML 静态数据回归，另增 bestcf 静态镜像双入口）；新增 cfyes/ircf 镜像、uouin 静态镜像（防官网改版）、090227 实时三网 API（每请求实时生成）、Xiaobei09 全量版（600+ 条）、天诚2/3；cf.090227 接口条数参数 6/8 → 50；体检结果：有效源 40/40
+- **三网反代上线（2026-09-27）**：`cloudflare.223226.xyz` 下线（DNS 记录清理、数据源与维护配置移除）；新增 `ct`/`cu`/`cmcc.223226.xyz` 三个按运营商分池的反代域名——从 bestcf 导航站「MJZ 三网卡片」挖到 5 个分运营商实测源（MJZ 电信/联通、LZ 电信/双网、gaoji/svip-s 陕西移动），产出 `proxy-ct/cu/cmcc.txt`，随反代批次（每小时）更新
 
 ## 开源协议
 
