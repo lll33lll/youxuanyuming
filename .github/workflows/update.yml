@@ -105,3 +105,14 @@ jobs:
             exit 0
           fi
           python retire_cloudflare.py
+
+      - name: 提交 DNS 错误日志（如有）
+        if: always()
+        run: |
+          if [ -s dns-error.log ]; then
+            git add dns-error.log
+            git commit -m "chore: DNS 错误日志 $(date -u '+%Y-%m-%d %H:%M') UTC" || true
+            git push || true
+          else
+            echo "无错误日志"
+          fi

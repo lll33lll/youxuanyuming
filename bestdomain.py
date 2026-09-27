@@ -119,6 +119,12 @@ class CFError(Exception):
     pass
 
 
+def log_error(msg: str):
+    """记录错误到 dns-error.log（由 workflow 提交回仓库，便于排查单条/域名级失败）。"""
+    with open("dns-error.log", "a", encoding="utf-8") as f:
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+
+
 def cf(method: str, path: str, body=None):
     """调用 Cloudflare API，失败抛 CFError；瞬时错误（网络抖动/5xx/429）自动重试 3 次。"""
     url = API_BASE + path
@@ -137,6 +143,8 @@ def cf(method: str, path: str, body=None):
             if not payload.get("success"):
                 raise CFError(f"API 失败 {method} {path}: {json.dumps(payload.get('errors', []))[:500]}")
             return payload.get("result")
+        except CFError:
+            raise  # 应用级错误（API 返回 success=false），重试无意义，直接抛出
         except urllib.error.HTTPError as e:
             detail = e.read().decode("utf-8", "replace")[:500]
             last_err = CFError(f"HTTP {e.code} {method} {path}: {detail}")
@@ -337,19 +345,33 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
         print(f"[{fqdn}] dry-run 模式，未实际改动")
         return
 
-    # 2. 先加后删（保证任意时刻域名都有记录可解析）
+    # 2. 先加后删（保证任意时刻域名都有记录可解析）；
+    #    单条操作失败不中断（记录到 dns-error.log 后继续），避免个别被拒的 IP 拖垮整批
+    failed = 0
     for rtype, ips in (("A", to_add), ("AAAA", to_add6)):
         for ip in ips:
-            cf("POST", f"/zones/{zone_id}/dns_records", {
-                "type": rtype, "name": fqdn, "content": ip,
-                "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
-            })
-            print(f"  已新增: {rtype} {ip}")
-            time.sleep(0.2)  # 平滑写入，避免批量创建触发 API 限流（首轮曾于第 ~130 条中断）
+            try:
+                cf("POST", f"/zones/{zone_id}/dns_records", {
+                    "type": rtype, "name": fqdn, "content": ip,
+                    "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
+                })
+                print(f"  已新增: {rtype} {ip}")
+            except CFError as e:
+                failed += 1
+                print(f"  [单条失败] 新增 {rtype} {ip}: {e}")
+                log_error(f"{fqdn} 新增 {rtype} {ip} 失败: {e}")
+            time.sleep(0.2)  # 平滑写入，避免批量创建触发 API 写限制
     for r in to_delete + to_delete6:
-        cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
-        print(f"  已删除: {r['content']}")
+        try:
+            cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
+            print(f"  已删除: {r['content']}")
+        except CFError as e:
+            failed += 1
+            print(f"  [单条失败] 删除 {r['content']}: {e}")
+            log_error(f"{fqdn} 删除 {r['content']} 失败: {e}")
         time.sleep(0.2)
+    if failed:
+        log_error(f"{fqdn}: 本次共 {failed} 条单条操作失败（已跳过，未中断其他域名）")
 
 
 def select_subdomains(scope: str):
@@ -364,6 +386,8 @@ def select_subdomains(scope: str):
 
 
 def main() -> int:
+    # 每次运行重置错误日志（失败内容由 workflow 提交回仓库便于排查）
+    open("dns-error.log", "w").close()
     args = sys.argv[1:]
     dry_run = "--dry-run" in args or os.environ.get("DRY_RUN") == "1"
 
@@ -388,12 +412,21 @@ def main() -> int:
         print(f"本次范围: {scope} -> {', '.join(targets)}")
         zone_id = get_zone_id(zone_name)
         for subdomain, cfg in targets.items():
-            update_subdomain(zone_id, zone_name, subdomain, cfg["sources"], dry_run,
-                             cf_only=cfg.get("cf_only", True),
-                             only_ranges=cfg.get("only_ranges"))
+            try:
+                update_subdomain(zone_id, zone_name, subdomain, cfg["sources"], dry_run,
+                                 cf_only=cfg.get("cf_only", True),
+                                 only_ranges=cfg.get("only_ranges"))
+            except CFError as e:
+                # 单域名失败不中断其余域名（记录后继续）
+                print(f"[错误] {subdomain}: {e}")
+                log_error(f"域名 {subdomain} 整体失败: {e}")
             time.sleep(0.5)
     except CFError as e:
         print(f"错误：{e}")
+        return 1
+    # 有错误记录时返回非零（标记 run 失败便于提醒；各域名均已尽力处理）
+    if os.path.exists("dns-error.log") and os.path.getsize("dns-error.log") > 0:
+        print("完成（有错误，详见 dns-error.log）")
         return 1
     print("完成" + ("（dry-run，未改动）" if dry_run else ""))
     return 0
