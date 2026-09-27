@@ -18,7 +18,7 @@
 - static: 开头 → 固定 IP 列表（逗号分隔）
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
 - dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
-- ecs-multi: 开头 → 运营商 ECS 视角（代表性 IP 作 EDNS Client Subnet）解析并合并 A 记录
+- ecs-multi: 开头 → 运营商 ECS 视角（代表性 IP 作 EDNS Client Subnet）解析并合并 A 记录（可加 @ct,cu,cmcc 选视角组）
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
 
 IPv4 进 A 记录；IPv6（限 Cloudflare 官方网段）进 AAAA 记录，双轨分开维护。
@@ -47,19 +47,19 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：仅 172.64.229.x 段（电信）——static 锁定 5 条 + saas.sin.fan（仅电信视角）+ ct 域名批量
-    # 2026-09-27：三网实验后按需求收窄回纯 229 段（172.64.229.0/24）：保留 static 5 条与 ct.877774.xyz；
-    #   saas.sin.fan 只采集电信视角（联通/移动视角从源头去掉，不查不产）；cu/cmcc 源已撤；
-    #   only_ranges 白名单保留作保险（只放行 172.64.229.0/24）
+    # 精选官方：电信 229 段精选 + 联通/移动线路全收
+    # 2026-09-27 定型：static 锁定 5 条 + saas.sin.fan ECS 三网视角 + ct.877774.xyz 批量（8 条）
+    #   - 电信视角（ct 组）：只保留 172.64.229.x 段
+    #   - 联通/移动视角（cu/cmcc 组）：不限段，全收
+    #   电信限段由视角组内过滤保证；不再设域级 only_ranges（否则联通/移动产出全被拦）
     #   此前先后撤掉 ip.164746.xyz、CloudFlareYes 电信与 dns-multi（wetest.vip 2026-09-07 改版 JS 渲染后已移除）
     "cf": {
         "sources": [
             "static:172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
-            "ecs-multi:saas.sin.fan",
-            "dns:ct.877774.xyz",   # QMS 电信（172.64.229.x 批量 8 条）
+            "ecs-multi:saas.sin.fan",  # 三网视角：电信仅 229 段；联通/移动全收
+            "dns:ct.877774.xyz",       # QMS 电信（172.64.229.x 批量 8 条）
         ],
         "cf_only": True,
-        "only_ranges": ["172.64.229.0/24"],
     },
     # 全量官方：本仓库采集的合并列表（16 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
@@ -100,17 +100,31 @@ DOH_ENDPOINTS = [
 ]
 DOH_ROUNDS = 6  # 每个端点的查询轮数（部分视角的记录会轮换，多查几轮才能收全）
 
-# ECS 视角（ecs-multi 源用）：用运营商代表性 IP 作为 EDNS Client Subnet，
-# 让 GeoDNS 优选域名（如 saas.sin.fan）按真实线路返回记录。
-# 2026-09-27：cf 收窄为纯 229 段后仅保留电信视角（联通/移动视角产出已不再使用，直接从采集源头去掉）
-ECS_VIEWS = [
-    "219.141.136.10", "202.96.209.133", "202.96.128.86", "61.139.2.69",     # 电信：北京/上海/广东/四川
-]
+# ECS 视角组（ecs-multi 源用）：组名 -> (运营商代表 IP 列表, 该组段白名单 or None)
+# 用运营商代表性 IP 作为 EDNS Client Subnet，让 GeoDNS 优选域名（如 saas.sin.fan）按真实线路返回记录。
+# - ct  组：电信视角，只收 172.64.229.x 段（电信 229 精选）
+# - cu  组：联通视角，不限段（全收）
+# - cmcc 组：移动视角，不限段（全收）
+ECS_VIEW_GROUPS = {
+    "ct": (
+        ["219.141.136.10", "202.96.209.133", "202.96.128.86", "61.139.2.69"],  # 北京/上海/广东/四川
+        ["172.64.229.0/24"],
+    ),
+    "cu": (
+        ["123.123.123.123", "210.22.70.3", "210.21.196.6", "119.6.6.6"],  # 北京/上海/广东/四川
+        None,
+    ),
+    "cmcc": (
+        ["211.136.112.50", "211.137.160.50", "211.136.20.203", "221.131.143.69",  # 上海/天津/广东/江苏
+         "211.139.29.68", "211.140.197.58"],                                      # 云南/辽宁
+        None,
+    ),
+}
 ECS_ENDPOINTS = [
     "https://dns.alidns.com/resolve",  # 阿里 DNS（ECS 路由最准）
     "https://doh.pub/resolve",         # 腾讯 DNSPod
 ]
-ECS_ROUNDS = 2  # 每个端点每视角的查询轮数
+ECS_ROUNDS = 4  # 每个端点每视角的查询轮数（池子记录会轮换，多查几轮才能收全；实测 4 轮可稳定收全三网池）
 
 
 class CFError(Exception):
@@ -173,29 +187,45 @@ def resolve_dns_multi(hostname: str) -> str:
     return "\n".join(sorted(ips))
 
 
-def resolve_ecs_multi(hostname: str) -> str:
-    """ECS 视角解析：用 ECS_VIEWS 里的运营商代表性 IP 作 EDNS Client Subnet
-    查询 A 记录并合并去重（GeoDNS 按线路返回不同记录时收全对应池子）。
+def resolve_ecs_multi(hostname: str, groups=None) -> str:
+    """ECS 视角解析：按运营商视角组查询 A 记录，组内过滤后合并去重。
+
+    源语法 `ecs-multi:host@ct,cu,cmcc` 指定视角组，不带 @ 查全部组。
+    ct 组只收 172.64.229.x 段；cu/cmcc 组不限段（全收）。
     """
+    if groups is None:
+        groups = list(ECS_VIEW_GROUPS)
     ips = set()
-    for ecs in ECS_VIEWS:
-        for endpoint in ECS_ENDPOINTS:
-            fails = 0
-            for _ in range(ECS_ROUNDS):
-                try:
-                    req = urllib.request.Request(
-                        f"{endpoint}?name={hostname}&type=A&edns_client_subnet={ecs}/24",
-                        headers={"Accept": "application/dns-json", "User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        data = json.loads(resp.read().decode("utf-8", "replace"))
-                    for ans in data.get("Answer", []):
-                        if ans.get("type") == 1:
-                            ips.add(str(ans["data"]))
-                    fails = 0
-                except Exception:  # noqa: BLE001
-                    fails += 1
-                    if fails >= 2:  # 连续失败视为端点不可达，跳下一个
-                        break
+    for name in groups:
+        views, ranges = ECS_VIEW_GROUPS.get(name, ([], None))
+        nets = tuple(ipaddress.ip_network(r) for r in ranges) if ranges else None
+        for ecs in views:
+            for endpoint in ECS_ENDPOINTS:
+                fails = 0
+                for _ in range(ECS_ROUNDS):
+                    try:
+                        req = urllib.request.Request(
+                            f"{endpoint}?name={hostname}&type=A&edns_client_subnet={ecs}/24",
+                            headers={"Accept": "application/dns-json", "User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            data = json.loads(resp.read().decode("utf-8", "replace"))
+                        for ans in data.get("Answer", []):
+                            if ans.get("type") != 1:
+                                continue
+                            candidate = str(ans["data"])
+                            if nets is not None:
+                                try:
+                                    ok = any(ipaddress.ip_address(candidate) in net for net in nets)
+                                except ValueError:
+                                    continue
+                                if not ok:
+                                    continue  # 组内白名单外的记录（如电信视角里的非 229 段）
+                            ips.add(candidate)
+                        fails = 0
+                    except Exception:  # noqa: BLE001
+                        fails += 1
+                        if fails >= 2:  # 连续失败视为端点不可达，跳下一个
+                            break
     return "\n".join(sorted(ips))
 
 
@@ -207,8 +237,12 @@ def fetch_text(source: str) -> str:
         # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
         return resolve_dns_multi(source[len("dns-multi:"):])
     if source.startswith("ecs-multi:"):
-        # ecs-multi 型来源：运营商 ECS 视角解析 A 记录并合并（GeoDNS 按线路分流；cf 现仅电信视角）
-        return resolve_ecs_multi(source[len("ecs-multi:"):])
+        # ecs-multi 型来源：运营商 ECS 视角解析并合并（GeoDNS 按线路分流）
+        # 支持 @ct,cu,cmcc 指定视角组（不带 @ 查全部组）
+        spec = source[len("ecs-multi:"):]
+        host, _, group_str = spec.partition("@")
+        groups = [g.strip() for g in group_str.split(",") if g.strip()] or None
+        return resolve_ecs_multi(host, groups)
     if source.startswith("dns:"):
         # dns 型来源：解析优选域名的 A 记录（站长实测维护的记录）
         ips = sorted({ai[4][0] for ai in socket.getaddrinfo(source[4:], None, socket.AF_INET)})
