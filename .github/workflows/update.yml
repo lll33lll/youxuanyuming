@@ -1,12 +1,6 @@
 name: 采集优选IP并更新DNS
 
 on:
-  # 【临时】代码文件更新即触发一次运行（加速首轮三网反代批次；验证后移除本段，仅保留 schedule + workflow_dispatch）
-  push:
-    paths:
-      - 'collect_ips.py'
-      - 'bestdomain.py'
-      - 'retire_cloudflare.py'
   schedule:
     # :17 批次 = 官方+反代全量（官方池 cf 每 3 小时换新）
     - cron: '17 0,3,6,9,12,15,18,21 * * *'
