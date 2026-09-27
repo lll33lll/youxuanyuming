@@ -14,8 +14,8 @@
 - 实测数值：uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源自带的延迟（越低越好，最高 +30）
   与速度 mb/mbps/M（越快越好，最高 +50）
 - 多源共识（每个独立来源 +10）：被越多数据源同时收录，说明各家测试都认可
-- 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库
-- 最终按总分排序：官方池取前 50（不进 DNS），反代池与三网池取前 30（zone 记录配额约 200 条，预留余量）
+- 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库；三网池对头部候选另做 3 次实测复验（≥2/3 通过才入选）
+- 最终按总分排序：官方池取前 50（不进 DNS），反代池 proxy 取前 30、三网池 ct/cu/cmcc 取「优质 20」（zone 记录配额约 200 条，预留余量）
 （注：runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注）
 
 其他特点：
@@ -163,7 +163,12 @@ _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 
 # 输出上限
 MAX_IPS = 50        # ip.txt（官方优选；只供外部引用不进 DNS，无配额约束）
-MAX_PROXY_IPS = 30  # proxy/ct/cu/cmcc.txt（进 DNS 的反代池；zone 记录配额约 200，取 30 预留余量）
+MAX_PROXY_IPS = 30  # proxy.txt（进 DNS 的反代池；zone 记录配额约 200，取 30 预留余量）
+# 三网反代（ct/cu/cmcc）「优质 20」方案：存活验证后对头部候选做 3 次 TCP 实测复验（≥2/3 通过）再取前 20
+TRI_FINAL_N = 20      # 三网反代域名最终写入的记录数（2026-09-27 定型：优质 20）
+TRI_VERIFY_TOP = 150  # 参与存活验证的候选数（按分数取头部）
+TRI_PROBE_BATCH = 40  # 复验每批数量（分批做，凑够 20 即停）
+TRI_PROBE_MAX = 80    # 复验最多检查的候选数（超出未凑够则用单验存活补足）
 TIMEOUT = 20
 RETRIES = 2
 
@@ -315,6 +320,25 @@ def alive_check(ips, timeout=5, workers=20):
     return [ip for ip, ok in zip(ips, flags) if ok]
 
 
+def tcp_probe(ip, tries=3, timeout=3.0):
+    """对单个 IP 做多次 TCP 443 探测，返回 (成功次数, 中位延迟 ms)。
+
+    用于三网反代的「3 次实测复验」：单次连接可能受抖动/假活影响，成功 ≥2 次才入选。
+    """
+    ok = 0
+    vals = []
+    for _ in range(tries):
+        try:
+            t0 = time.perf_counter()
+            with socket.create_connection((ip, 443), timeout=timeout):
+                vals.append((time.perf_counter() - t0) * 1000)
+                ok += 1
+        except Exception:  # noqa: BLE001
+            pass
+    med = sorted(vals)[len(vals) // 2] if vals else None
+    return ok, med
+
+
 def run_collection(sources, extract, label):
     """跑一组数据源。返回 (按优先级去重后的 IP 列表, 可用源数量, 逐 IP 信息表)。"""
     merged = []
@@ -433,6 +457,7 @@ def main() -> int:
                   "保留旧 proxy.txt（不影响官方域名维护）")
 
     # 三网反代池（按运营商分池；随反代批次一起跑）
+    # 「优质 20」方案（2026-09-27 定稿）：存活验证 + 头部候选 3 次 TCP 实测复验（≥2/3 通过），最终取 20
     if scope in ("all", "proxy"):
         for key, src_list in TRI_PROXY_SOURCES.items():
             tri, ok, tinfo = run_collection(
@@ -440,16 +465,31 @@ def main() -> int:
             if ok >= min_sources_ok(len(src_list)) and len(tri) >= 5:
                 ranked = sorted(tri,
                                 key=lambda ip: (-score_of(tinfo[ip]), tuple(int(p) for p in ip.split("."))))
-                to_verify = ranked[:MAX_PROXY_IPS + 30]
+                to_verify = ranked[:TRI_VERIFY_TOP]
                 print(f"[三网-{key}] 存活验证 {len(to_verify)} 个候选（TCP 443，并发）...")
-                alive = alive_check(to_verify)
+                alive = alive_check(to_verify, workers=30)
                 print(f"[三网-{key}] 存活 {len(alive)}/{len(to_verify)}")
                 if len(alive) >= 5:
-                    final = alive[:MAX_PROXY_IPS]
+                    # 3 次实测复验：分批对头部候选做 3 次 TCP 探测，≥2 次成功才算「实」
+                    solid = []
+                    probed = 0
+                    while len(solid) < TRI_FINAL_N and probed < len(alive) and probed < TRI_PROBE_MAX:
+                        batch = alive[probed:probed + TRI_PROBE_BATCH]
+                        with ThreadPoolExecutor(max_workers=30) as ex:
+                            results = list(ex.map(tcp_probe, batch))
+                        solid += [ip for ip, (p_ok, _) in zip(batch, results) if p_ok >= 2]
+                        probed += len(batch)
+                        print(f"[三网-{key}] 复验 {probed} 个，通过 {len(solid)} 个")
+                    if len(solid) < TRI_FINAL_N:
+                        fill = [ip for ip in alive[probed:] if ip not in solid]
+                        print(f"[三网-{key}] 警告：复验通过仅 {len(solid)} 个（<{TRI_FINAL_N}），"
+                              f"用单验存活补足 {min(len(fill), TRI_FINAL_N - len(solid))} 个")
+                        solid += fill
+                    final = solid[:TRI_FINAL_N]
                 else:
-                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 {MAX_PROXY_IPS}")
-                    final = ranked[:MAX_PROXY_IPS]
-                write_file(f"proxy-{key}.txt", final, MAX_PROXY_IPS)
+                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 {TRI_FINAL_N}")
+                    final = ranked[:TRI_FINAL_N]
+                write_file(f"proxy-{key}.txt", final, TRI_FINAL_N)
                 print(f"[三网-{key}] 打分 Top5：")
                 for ip in final[:5]:
                     ent = tinfo[ip]
