@@ -108,25 +108,34 @@ PROXY_SOURCES = [
 
 # ============ 三网反代池（按运营商分池，产出 proxy-ct / proxy-cu / proxy-cmcc）============
 # 来源为 bestcf.pages.dev 导航站「MJZ 卡片」收录的分运营商实测源；
-# 数据源声明：MJZ=按线路实测（联通/电信）、LZ=四川（电信/电信联通）、gaoji/svip-s=陕西移动。
+# 数据源声明：MJZ=按线路实测（联通/电信，含全量库）、LZ=四川（电信/电信联通）、gaoji/svip-s=陕西移动（R2+GitHub 双入口）。
+# 2026-09-27 深挖增补：MJZ 全量库×2、LZ 终选、svip-s 全量镜像（经筛选复验后并入）。
 # 注意：LZ 的「电信联通」双网系列（ubest/ufull）同时供 ct 与 cu 两个池子使用。
 TRI_PROXY_SOURCES = {
     "ct": [
         # MJZ 电信实测（每 45 分钟更新）
         {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
+        # MJZ 电信全量库（北京视角；2026-09-27 深挖并入）
+        {"name": "MJZ 电信全量", "url": "https://cf.junzhen.qzz.io/full_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
         # LZ 电信实测（每 2 小时更新，四川）
         {"name": "LZ 电信", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["电信"]},
         {"name": "LZ 电信全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["电信"]},
         # LZ 电信联通双网（同时供 ct / cu）
         {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["电信"]},
         {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["电信"]},
+        # LZ 终选（人工终选小名单，供共识加权）
+        {"name": "LZ 终选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/final_ips.txt", "port443_only": True, "carriers": ["电信"]},
     ],
     "cu": [
         # MJZ 联通实测（每 45 分钟更新）
         {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True, "carriers": ["联通"]},
+        # MJZ 联通全量库（2026-09-27 深挖并入）
+        {"name": "MJZ 联通全量", "url": "https://cf.junzhen.qzz.io/full_ips.txt", "port443_only": True, "carriers": ["联通"]},
         # LZ 电信联通双网（站方在 bestcf 导航站将其标注为联通向）
         {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
         {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["联通"]},
+        # LZ 终选（人工终选小名单，供共识加权）
+        {"name": "LZ 终选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/final_ips.txt", "port443_only": True, "carriers": ["联通"]},
     ],
     "cmcc": [
         # gaoji.uk（svip-s 项目 R2 入口，陕西移动实测）
@@ -134,6 +143,7 @@ TRI_PROXY_SOURCES = {
         {"name": "gaoji 移动全量", "url": "https://ips.gaoji.uk/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
         # svip-s GitHub 镜像入口（同一项目，R2 不可达时兜底）
         {"name": "svip-s 移动", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
+        {"name": "svip-s 移动全量", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
     ],
 }
 
@@ -254,7 +264,7 @@ def enrich_info(info, text, src_carriers):
     """从源文本提取三网标签与延迟/速度数值，更新到 info。
 
     按行或 HTML 表格行（<tr>）分块；块内出现 电信/联通/移动 记运营商覆盖，
-    出现 "136.85ms" 记延迟、“55.36mb"/“6.92mb/s"/“9.85Mbps"/“13M” 记速度（多块取最优值）。
+    出现 "136.85ms" 记延迟、“55.36mb”/“6.92mb/s”/“9.85Mbps”/“13M” 记速度（多块取最优值）。
     uouin 的 HTML 表格里运营商、IP、延迟、带宽同在一个 <tr> 行内（每个 <td>
     内部有换行），必须按 <tr> 整行切块而不是按换行切。
     """
