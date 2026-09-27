@@ -105,6 +105,37 @@ PROXY_SOURCES = [
     {"name": "CM IP库", "url": "https://zip.cm.edu.kg/all.txt", "port443_only": True},
 ]
 
+# ============ 三网反代池（按运营商分池，产出 proxy-ct / proxy-cu / proxy-cmcc）============
+# 来源为 bestcf.pages.dev 导航站「MJZ 卡片」收录的分运营商实测源；
+# 数据源声明：MJZ=按线路实测（联通/电信）、LZ=四川（电信/电信联通）、gaoji/svip-s=陕西移动。
+# 注意：LZ 的「电信联通」双网系列（ubest/ufull）同时供 ct 与 cu 两个池子使用。
+TRI_PROXY_SOURCES = {
+    "ct": [
+        # MJZ 电信实测（每 45 分钟更新）
+        {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
+        # LZ 电信实测（每 2 小时更新，四川）
+        {"name": "LZ 电信", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["电信"]},
+        {"name": "LZ 电信全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["电信"]},
+        # LZ 电信联通双网（同时供 ct / cu）
+        {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["电信"]},
+        {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["电信"]},
+    ],
+    "cu": [
+        # MJZ 联通实测（每 45 分钟更新）
+        {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True, "carriers": ["联通"]},
+        # LZ 电信联通双网（站方在 bestcf 导航站将其标注为联通向）
+        {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
+        {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["联通"]},
+    ],
+    "cmcc": [
+        # gaoji.uk（svip-s 项目 R2 入口，陕西移动实测）
+        {"name": "gaoji 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
+        {"name": "gaoji 移动全量", "url": "https://ips.gaoji.uk/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
+        # svip-s GitHub 镜像入口（同一项目，R2 不可达时兜底）
+        {"name": "svip-s 移动", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
+    ],
+}
+
 # Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
 CF_V4_RANGES = [
     "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
@@ -389,6 +420,35 @@ def main() -> int:
         else:
             print(f"[反代] 警告：反代源大面积异常（{ok}/{len(PROXY_SOURCES)} 可用，仅 {len(proxies)} 个 IP），"
                   "保留旧 proxy.txt（不影响官方域名维护）")
+
+    # 三网反代池（按运营商分池；随反代批次一起跑）
+    if scope in ("all", "proxy"):
+        for key, src_list in TRI_PROXY_SOURCES.items():
+            tri, ok, tinfo = run_collection(
+                src_list, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), f"三网-{key}")
+            if ok >= min_sources_ok(len(src_list)) and len(tri) >= 5:
+                ranked = sorted(tri,
+                                key=lambda ip: (-score_of(tinfo[ip]), tuple(int(p) for p in ip.split("."))))
+                to_verify = ranked[:MAX_PROXY_IPS + 30]
+                print(f"[三网-{key}] 存活验证 {len(to_verify)} 个候选（TCP 443，并发）...")
+                alive = alive_check(to_verify)
+                print(f"[三网-{key}] 存活 {len(alive)}/{len(to_verify)}")
+                if len(alive) >= 5:
+                    final = alive[:MAX_PROXY_IPS]
+                else:
+                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 50")
+                    final = ranked[:MAX_PROXY_IPS]
+                write_file(f"proxy-{key}.txt", final, MAX_PROXY_IPS)
+                print(f"[三网-{key}] 打分 Top5：")
+                for ip in final[:5]:
+                    ent = tinfo[ip]
+                    lat = f"{ent['latency']:.0f}ms" if ent["latency"] is not None else "-"
+                    spd = f"{ent['speed']:.1f}MB/s" if ent["speed"] is not None else "-"
+                    nets = "/".join(sorted(ent["carriers"])) if ent["carriers"] else "-"
+                    print(f"  {ip:18s} 分数{score_of(ent):6.1f} | 来源{len(ent['sources'])} | 三网{nets} | {lat} {spd}")
+            else:
+                print(f"[三网-{key}] 警告：源异常（{ok}/{len(src_list)} 可用，仅 {len(tri)} 个 IP），"
+                      f"保留旧 proxy-{key}.txt 不动")
 
     return rc
 
