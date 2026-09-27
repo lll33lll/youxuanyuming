@@ -47,13 +47,17 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：SIN 优选域名 saas.sin.fan 三网 ECS 解析（电信/联通/移动视角分别收集）+ static 锁定原有 5 条
+    # 精选官方：SIN 优选域名 saas.sin.fan 三网 ECS 解析 + QMS 三网域名（ct/cu/cmcc.877774.xyz）
     # 2026-09-27：改为三网解析取全池（电信 229.x / 联通 152・156.x / 移动 104.x・153.74），static 5 条保留不动；
+    #   追加 ct/cu/cmcc.877774.xyz（按运营商域名，固定批量）作为第二数据源；
     #   此前先后撤掉 ip.164746.xyz、CloudFlareYes 电信与 dns-multi（wetest.vip 2026-09-07 改版 JS 渲染后已移除）
     "cf": {
         "sources": [
             "static:172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
             "ecs-multi:saas.sin.fan",
+            "dns:ct.877774.xyz",   # QMS 电信（172.64.229.x 批量 8 条）
+            "dns:cu.877774.xyz",   # QMS 联通（CNAME 橙云记录 2 条）
+            "dns:cmcc.877774.xyz", # QMS 移动（104.16.148/149.x 批量 26 条）
         ],
         "cf_only": True,
     },
