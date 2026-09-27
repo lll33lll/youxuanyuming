@@ -11,7 +11,7 @@
 - 新列表少于 2 个 IP 时直接跳过该域名（数据源抽风也不会把你现有记录清空）
 - 每个域名的记录数量有上限，超出截断
 - 支持 --dry-run 只打印计划不实际改动
-- 支持 --only 指定范围：all=全部 / official=官方域名(cf/cloudflare) / proxy=反代域名
+- 支持 --only 指定范围：all=全部 / official=官方域名(cf) / proxy=反代域名(proxy/ct/cu/cmcc)
 
 来源格式：
 - http(s):// 开头 → 抓取网页/接口提取 IP
@@ -61,10 +61,12 @@ SUBDOMAIN_IP_SOURCES = {
         "cf_only": True,
         "only_ranges": ["172.64.229.0/24"],
     },
-    # 全量官方：本仓库采集的合并列表（16 个数据源）
-    "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
     # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
     "proxy": {"sources": ["proxy.txt"], "cf_only": False},
+    # 三网反代：按运营商分池的反代 IP（来源为 bestcf 导航站收录的分运营商实测源）
+    "ct": {"sources": ["proxy-ct.txt"], "cf_only": False},
+    "cu": {"sources": ["proxy-cu.txt"], "cf_only": False},
+    "cmcc": {"sources": ["proxy-cmcc.txt"], "cf_only": False},
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
