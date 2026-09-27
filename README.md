@@ -17,7 +17,7 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 5 条 + [saas.sin.fan](https://saas.sin.fan)（仅电信视角采集）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 + [eii.at](https://eii.at) / [www.wuduanyun.com](https://www.wuduanyun.com) / [cf.877774.xyz](https://cf.877774.xyz) / [cf.cnno.de](https://cf.cnno.de)（2026-09-28 深挖增补） | 官方网段·精选，每 3 小时 |
+| `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 10 条 + [saas.sin.fan](https://saas.sin.fan)（仅电信视角采集）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 + [eii.at](https://eii.at) / [www.wuduanyun.com](https://www.wuduanyun.com) / [cf.877774.xyz](https://cf.877774.xyz) / [cf.cnno.de](https://cf.cnno.de) / [saas.072159.xyz](https://saas.072159.xyz) / [www.5199dy.com](https://www.5199dy.com) / [tt.78607323.xyz](https://tt.78607323.xyz) / [cf.itv888.cn](https://cf.itv888.cn)（2026-09-28 两轮深挖增补，池成员 13 → 18） | 官方网段·精选，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（26 源候选池 → 三网质量打分 + 存活验证，取 Top 30；含 MJZ 联通/电信（优选+全量）、LZ 电信/双网/终选、gaoji/svip-s 移动（优选+全量）、Xgonce/Xiaobei09 等带实测数值的源） | **第三方反代节点**，每 1 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
@@ -117,6 +117,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - **DNS 配额修复（2026-09-27）**：批量建记录撞上 Cloudflare zone 记录配额（错误码 81045，免费版约 200 条/zone）——反代域名每域名上限 50 → 30（cf 13 + 4×30 = 133，预留余量）；更新顺序改为“净收缩先删后加”防配额峰值；单条失败不中断记录 + 错误自动落盘 `dns-error.log` 并提交
 - **三网反代域名下线、数据源并入 proxy（2026-09-28）**：`ct`/`cu`/`cmcc.223226.xyz` 三个分运营商反代域名下线（DNS 遗留记录由一次性脚本 `retire_tri_dns.py` 清理后移除；采集与维护配置全部撤出）；原三网数据源（MJZ 电信/联通 × 优选+全量、LZ 电信/双网/终选、gaoji/svip-s 移动 × 优选+全量）并入 `proxy` 池（17 → 26 源），反代池仍按三网质量打分取 Top 30
 - **229 段六域名深挖增补（2026-09-28）**：对 `eii.at` / `www.wuduanyun.com` / `www.galgamex.net` / `cf.3666888.xyz` / `cf.877774.xyz` / `cdn.cnno.de` 做多解析器 × 多轮 + 三网 ECS 视角 + 子域枚举深挖（5 解析器 / 10 ECS 视角 / 260 候选子域）：`cf` 池新增四个 229 来源——`eii.at`（saas 同链别名）、`www.wuduanyun.com`（→ blinkloop → cf.877774）、`cf.877774.xyz`（QMS 根域）、`cf.cnno.de`（深挖发现的别名入口）；`www.galgamex.net` / `cf.3666888.xyz`（含 `9.cf`、`cfadmin` 链路，104.16.150/151.x 等池）/ `cdn.cnno.de` 本体（182682 轮换池）无 229 记录未接入。深挖结论：六域名所供 229 均为现有 13 条家族子集，未发现段内新成员
+- **229 段 28 域名深挖 R2（2026-09-28）**：对「JP 电信优选」28 域名清单做全视角深挖（5 解析器 × 多轮 + 三网 ECS ×10 视角 + 812 子域候选枚举）：**新发现 5 个 229 成员（此前 13 条家族之外）并 static 锁定——`172.64.229.45` / `.54` / `.70` / `.183` / `.237`**，池成员 13 → 18；新增 4 个全视角稳定的 dns 直取源（`saas.072159.xyz` → .45、`www.5199dy.com`（xl.chunqiu25.com 链）→ .45/.54、`tt.78607323.xyz`（cnd.igum.eu.cc 链）→ .70/.237、`cf.itv888.cn` → .183）。其余域名无 229 或为已知池别名（galgamex / 3666888 / 7zz / mfyx → 104.16.15x 池；xreak / 224322 → 172.64.52.x；fn.130519 → 162.159.38/39；cf.92555 → oofy.site；img.css.sd / cf.777791 → 104.2x；cf2.996616 / cdn.cnno → 182682 轮换池）——未接入
 
 ## 开源协议
 
