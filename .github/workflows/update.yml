@@ -1,10 +1,16 @@
 name: 采集优选IP并更新DNS
 
 on:
+  # 【临时】代码文件更新即触发一次运行（加速首轮合并批次 + 三网 DNS 清理；验证后移除本段，仅保留 schedule + workflow_dispatch）
+  push:
+    paths:
+      - 'collect_ips.py'
+      - 'bestdomain.py'
+      - 'retire_tri_dns.py'
   schedule:
     # :17 批次 = 官方+反代全量（官方池 cf 每 3 小时换新）
     - cron: '17 0,3,6,9,12,15,18,21 * * *'
-    # :47 批次 = 仅反代（反代池 proxy + 三网反代 ct/cu/cmcc 每 1 小时换新）
+    # :47 批次 = 仅反代（反代池 proxy 每 1 小时换新）
     - cron: '47 * * * *'
   workflow_dispatch:
     inputs:
@@ -62,9 +68,9 @@ jobs:
       - name: 采集优选IP
         run: python collect_ips.py "$SCOPE"
 
-      - name: 提交 ip.txt / proxy.txt / 三网 proxy-*.txt
+      - name: 提交 ip.txt / proxy.txt
         run: |
-          FILES="ip.txt proxy.txt proxy-ct.txt proxy-cu.txt proxy-cmcc.txt"
+          FILES="ip.txt proxy.txt"
           if [ -n "$(git status --porcelain $FILES)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -86,6 +92,18 @@ jobs:
             exit 0
           fi
           python bestdomain.py --only "$SCOPE"
+
+      - name: 清理已停用子域 ct/cu/cmcc.223226.xyz（临时步骤，清理完成后移除）
+        if: always()
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_NAME: 223226.xyz
+        run: |
+          if [ -z "$CF_API_TOKEN" ]; then
+            echo "未配置 CF_API_TOKEN，跳过"
+            exit 0
+          fi
+          python retire_tri_dns.py
 
       - name: 提交 DNS 错误日志（如有）
         if: always()
