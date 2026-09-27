@@ -18,6 +18,7 @@
 - static: 开头 → 固定 IP 列表（逗号分隔）
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
 - dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
+- ecs-multi: 开头 → 三网 ECS 视角（电信/联通/移动代表性 IP 作 EDNS Client Subnet）解析并合并 A 记录
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
 
 IPv4 进 A 记录；IPv6（限 Cloudflare 官方网段）进 AAAA 记录，双轨分开维护。
@@ -46,17 +47,15 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：仅 SIN 优选域名 saas.sin.fan，且只收 172.64.229.x 段
-    # （static 锁定 5 条已知 IPv4 + dns-multi 自动发现，经 only_ranges 白名单收窄）
-    # 2026-09-27：先撤掉 ip.164746.xyz Top10 与 CloudFlareYes 电信两个源，再按需求删掉 162.x 与其它 172.x，只留 172.64.229.x
-    # （wetest.vip 原站 2026-09-07 改版 JS 渲染后已移除）
+    # 精选官方：SIN 优选域名 saas.sin.fan 三网 ECS 解析（电信/联通/移动视角分别收集）+ static 锁定原有 5 条
+    # 2026-09-27：改为三网解析取全池（电信 229.x / 联通 152・156.x / 移动 104.x・153.74），static 5 条保留不动；
+    #   此前先后撤掉 ip.164746.xyz、CloudFlareYes 电信与 dns-multi（wetest.vip 2026-09-07 改版 JS 渲染后已移除）
     "cf": {
         "sources": [
             "static:172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
-            "dns-multi:saas.sin.fan",
+            "ecs-multi:saas.sin.fan",
         ],
         "cf_only": True,
-        "only_ranges": ["172.64.229.0/24"],
     },
     # 全量官方：本仓库采集的合并列表（16 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
@@ -96,6 +95,20 @@ DOH_ENDPOINTS = [
     "https://cloudflare-dns.com/dns-query",  # Cloudflare（海外视角）
 ]
 DOH_ROUNDS = 6  # 每个端点的查询轮数（部分视角的记录会轮换，多查几轮才能收全）
+
+# 三网 ECS 视角（ecs-multi 源用）：用三大运营商代表性 IP 作为 EDNS Client Subnet，
+# 让 GeoDNS 优选域名（如 saas.sin.fan）按真实线路返回记录，收全三网各自池子
+ECS_VIEWS = [
+    "219.141.136.10", "202.96.209.133", "202.96.128.86", "61.139.2.69",     # 电信：北京/上海/广东/四川
+    "123.123.123.123", "210.22.70.3", "210.21.196.6", "119.6.6.6",          # 联通：北京/上海/广东/四川
+    "211.136.112.50", "211.137.160.50", "211.136.20.203", "221.131.143.69", # 移动：上海/天津/广东/江苏
+    "211.139.29.68", "211.140.197.58",                                      # 移动：云南/辽宁
+]
+ECS_ENDPOINTS = [
+    "https://dns.alidns.com/resolve",  # 阿里 DNS（ECS 路由最准）
+    "https://doh.pub/resolve",         # 腾讯 DNSPod
+]
+ECS_ROUNDS = 2  # 每个端点每视角的查询轮数
 
 
 class CFError(Exception):
@@ -158,6 +171,35 @@ def resolve_dns_multi(hostname: str) -> str:
     return "\n".join(sorted(ips))
 
 
+def resolve_ecs_multi(hostname: str) -> str:
+    """三网 ECS 视角解析：模拟电信/联通/移动客户端查询 A 记录并合并去重。
+
+    GeoDNS 优选域名（如 saas.sin.fan）对三网返回不同记录（电信 172.64.229.x、
+    联通 172.64.152/156.x、移动 104.x/153.74 等），用运营商代表性 IP 作
+    EDNS Client Subnet 查询才能收全三网各自的池子。
+    """
+    ips = set()
+    for ecs in ECS_VIEWS:
+        for endpoint in ECS_ENDPOINTS:
+            fails = 0
+            for _ in range(ECS_ROUNDS):
+                try:
+                    req = urllib.request.Request(
+                        f"{endpoint}?name={hostname}&type=A&edns_client_subnet={ecs}/24",
+                        headers={"Accept": "application/dns-json", "User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read().decode("utf-8", "replace"))
+                    for ans in data.get("Answer", []):
+                        if ans.get("type") == 1:
+                            ips.add(str(ans["data"]))
+                    fails = 0
+                except Exception:  # noqa: BLE001
+                    fails += 1
+                    if fails >= 2:  # 连续失败视为端点不可达，跳下一个
+                        break
+    return "\n".join(sorted(ips))
+
+
 def fetch_text(source: str) -> str:
     if source.startswith("static:"):
         # static 型来源：固定 IP 列表（逗号分隔，可含 v4 与 v6），用于测试或锁定特定 IP
@@ -165,6 +207,9 @@ def fetch_text(source: str) -> str:
     if source.startswith("dns-multi:"):
         # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
         return resolve_dns_multi(source[len("dns-multi:"):])
+    if source.startswith("ecs-multi:"):
+        # ecs-multi 型来源：三网（电信/联通/移动）ECS 视角解析 A 记录并合并（GeoDNS 按运营商分线路）
+        return resolve_ecs_multi(source[len("ecs-multi:"):])
     if source.startswith("dns:"):
         # dns 型来源：解析优选域名的 A 记录（站长实测维护的记录）
         ips = sorted({ai[4][0] for ai in socket.getaddrinfo(source[4:], None, socket.AF_INET)})
