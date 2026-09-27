@@ -18,7 +18,7 @@
 - static: 开头 → 固定 IP 列表（逗号分隔）
 - dns: 开头 → 解析优选域名的 A 记录（站长实测维护的记录）
 - dns-multi: 开头 → 多解析器（含国内 DoH）解析并合并 A 记录（GeoDNS 全视角，含轮换记录）
-- ecs-multi: 开头 → 三网 ECS 视角（电信/联通/移动代表性 IP 作 EDNS Client Subnet）解析并合并 A 记录
+- ecs-multi: 开头 → 运营商 ECS 视角（代表性 IP 作 EDNS Client Subnet）解析并合并 A 记录
 - 其他 → 按本地文件读取（如 ip.txt / proxy.txt）
 
 IPv4 进 A 记录；IPv6（限 Cloudflare 官方网段）进 AAAA 记录，双轨分开维护。
@@ -47,9 +47,10 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：仅 172.64.229.x 段（电信）——static 锁定 5 条 + saas.sin.fan 电信视角（only_ranges 收窄）+ ct 域名批量
+    # 精选官方：仅 172.64.229.x 段（电信）——static 锁定 5 条 + saas.sin.fan（仅电信视角）+ ct 域名批量
     # 2026-09-27：三网实验后按需求收窄回纯 229 段（172.64.229.0/24）：保留 static 5 条与 ct.877774.xyz；
-    #   saas.sin.fan 仅保留电信（229）产出，联通/移动产出与 cu/cmcc 源一并撤掉
+    #   saas.sin.fan 只采集电信视角（联通/移动视角从源头去掉，不查不产）；cu/cmcc 源已撤；
+    #   only_ranges 白名单保留作保险（只放行 172.64.229.0/24）
     #   此前先后撤掉 ip.164746.xyz、CloudFlareYes 电信与 dns-multi（wetest.vip 2026-09-07 改版 JS 渲染后已移除）
     "cf": {
         "sources": [
@@ -99,13 +100,11 @@ DOH_ENDPOINTS = [
 ]
 DOH_ROUNDS = 6  # 每个端点的查询轮数（部分视角的记录会轮换，多查几轮才能收全）
 
-# 三网 ECS 视角（ecs-multi 源用）：用三大运营商代表性 IP 作为 EDNS Client Subnet，
-# 让 GeoDNS 优选域名（如 saas.sin.fan）按真实线路返回记录，收全三网各自池子
+# ECS 视角（ecs-multi 源用）：用运营商代表性 IP 作为 EDNS Client Subnet，
+# 让 GeoDNS 优选域名（如 saas.sin.fan）按真实线路返回记录。
+# 2026-09-27：cf 收窄为纯 229 段后仅保留电信视角（联通/移动视角产出已不再使用，直接从采集源头去掉）
 ECS_VIEWS = [
     "219.141.136.10", "202.96.209.133", "202.96.128.86", "61.139.2.69",     # 电信：北京/上海/广东/四川
-    "123.123.123.123", "210.22.70.3", "210.21.196.6", "119.6.6.6",          # 联通：北京/上海/广东/四川
-    "211.136.112.50", "211.137.160.50", "211.136.20.203", "221.131.143.69", # 移动：上海/天津/广东/江苏
-    "211.139.29.68", "211.140.197.58",                                      # 移动：云南/辽宁
 ]
 ECS_ENDPOINTS = [
     "https://dns.alidns.com/resolve",  # 阿里 DNS（ECS 路由最准）
@@ -175,11 +174,8 @@ def resolve_dns_multi(hostname: str) -> str:
 
 
 def resolve_ecs_multi(hostname: str) -> str:
-    """三网 ECS 视角解析：模拟电信/联通/移动客户端查询 A 记录并合并去重。
-
-    GeoDNS 优选域名（如 saas.sin.fan）对三网返回不同记录（电信 172.64.229.x、
-    联通 172.64.152/156.x、移动 104.x/153.74 等），用运营商代表性 IP 作
-    EDNS Client Subnet 查询才能收全三网各自的池子。
+    """ECS 视角解析：用 ECS_VIEWS 里的运营商代表性 IP 作 EDNS Client Subnet
+    查询 A 记录并合并去重（GeoDNS 按线路返回不同记录时收全对应池子）。
     """
     ips = set()
     for ecs in ECS_VIEWS:
@@ -211,7 +207,7 @@ def fetch_text(source: str) -> str:
         # dns-multi 型来源：多解析器（含国内 DoH）解析 A 记录并合并（GeoDNS 全视角）
         return resolve_dns_multi(source[len("dns-multi:"):])
     if source.startswith("ecs-multi:"):
-        # ecs-multi 型来源：三网（电信/联通/移动）ECS 视角解析 A 记录并合并（GeoDNS 按运营商分线路）
+        # ecs-multi 型来源：运营商 ECS 视角解析 A 记录并合并（GeoDNS 按线路分流；cf 现仅电信视角）
         return resolve_ecs_multi(source[len("ecs-multi:"):])
     if source.startswith("dns:"):
         # dns 型来源：解析优选域名的 A 记录（站长实测维护的记录）
