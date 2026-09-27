@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-采集 Cloudflare 优选 IPv4，产出三组文件：
+采集 Cloudflare 优选 IPv4，产出两组文件：
 
-- ip.txt                官方网段优选 IP（只保留 CF 官方网段；供 cf. 域名与外部引用）
-- proxy.txt             第三方反代节点 IP（proxy. 域名用）
-- proxy-ct/cu/cmcc.txt  三网反代节点 IP（ct./cu./cmcc. 域名用；按运营商分池）
+- ip.txt     官方网段优选 IP（只保留 CF 官方网段；供 cf. 域名与外部引用）
+- proxy.txt  第三方反代节点 IP（proxy. 域名用；2026-09-28 起含原三网分运营商实测源）
 
 用法：python collect_ips.py [official|proxy|all]（默认 all）
 
@@ -14,8 +13,8 @@
 - 实测数值：uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源自带的延迟（越低越好，最高 +30）
   与速度 mb/mbps/M（越快越好，最高 +50）
 - 多源共识（每个独立来源 +10）：被越多数据源同时收录，说明各家测试都认可
-- 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库；三网池对头部候选另做 3 次实测复验（≥2/3 通过才入选）
-- 最终按总分排序：官方池取前 50（不进 DNS），反代池 proxy 取前 30、三网池 ct/cu/cmcc 取「优质 20」（zone 记录配额约 200 条，预留余量）
+- 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库
+- 最终按总分排序：官方池取前 50（不进 DNS），反代池 proxy 取前 30（zone 记录配额约 200 条，预留余量）
 （注：runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注）
 
 其他特点：
@@ -76,16 +75,29 @@ SOURCES = [
 # ============ 反代 IP 数据源（第三方架设的中转节点，流量会经过第三方服务器）============
 # port443_only=True 的源只保留 "IP:443" 格式的行（非 443 端口对 DNS 优选域名无意义）
 # carriers 字段：该源整体代表的运营商视角（行内还会再解析 电信/联通/移动 标签）
+# 2026-09-28：三网反代域名（ct/cu/cmcc.223226.xyz）下线，原三网分运营商实测源（MJZ/LZ/gaoji/svip-s）
+#             全部并入本池，与既有反代源合并去重后统一打分取 Top 30（17 → 26 源）
 PROXY_SOURCES = [
     # IPDB 优选反代 IP（每小时实测）
     {"name": "IPDB bestproxy", "url": "https://ipdb.api.030101.xyz/?type=bestproxy", "port443_only": False},
-    # MJZ 三网实测（每 45 分钟更新，带速度标注 "13M"）
+    # MJZ 实测（每 45 分钟更新，带速度标注 "13M"；联通 / 电信 各含优选 + 全量库）
     {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True, "carriers": ["联通"]},
+    {"name": "MJZ 联通全量", "url": "https://cf.junzhen.qzz.io/full_ips.txt", "port443_only": True, "carriers": ["联通"]},
     {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
-    # 陕西移动实测高速优选（带延迟/速度标注 "52.69ms 9.85Mbps"）
+    {"name": "MJZ 电信全量", "url": "https://cf.junzhen.qzz.io/full_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
+    # LZ 实测（每 2 小时更新，四川；电信 优选 + 全量）
+    {"name": "LZ 电信", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["电信"]},
+    {"name": "LZ 电信全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["电信"]},
+    # LZ 电信联通双网（两家线路实测）+ 人工终选小名单（供多源共识加权）
+    {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["电信", "联通"]},
+    {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["电信", "联通"]},
+    {"name": "LZ 终选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/final_ips.txt", "port443_only": True, "carriers": ["电信", "联通"]},
+    # 移动侧实测（陕西移动高速优选，带延迟/速度标注 "52.69ms 9.85Mbps"；
+    # gaoji.uk R2 入口与 svip-s GitHub 镜像为同一项目的双入口，优选 + 全量）
     {"name": "gaoji.uk 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
-    # LZ 联通实测（每 2 小时更新）
-    {"name": "LZ 联通", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
+    {"name": "gaoji 移动全量", "url": "https://ips.gaoji.uk/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
+    {"name": "svip-s 移动", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
+    {"name": "svip-s 移动全量", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
     # Xiaobei09 二筛稳定版（带延迟/速度标注 "28ms-27.40MB/s"）
     {"name": "Xiaobei09 稳定", "url": "https://raw.githubusercontent.com/Xiaobei09/ProxyIP/main/data/valid/all_46_ltd_stable.txt", "port443_only": True},
     # Xiaobei09 全量版（600+ 条 443 节点，带地区/速度标注；与稳定版为不同数据集，交集极小）
@@ -106,47 +118,6 @@ PROXY_SOURCES = [
     {"name": "CM IP库", "url": "https://zip.cm.edu.kg/all.txt", "port443_only": True},
 ]
 
-# ============ 三网反代池（按运营商分池，产出 proxy-ct / proxy-cu / proxy-cmcc）============
-# 来源为 bestcf.pages.dev 导航站「MJZ 卡片」收录的分运营商实测源；
-# 数据源声明：MJZ=按线路实测（联通/电信，含全量库）、LZ=四川（电信/电信联通）、gaoji/svip-s=陕西移动（R2+GitHub 双入口）。
-# 2026-09-27 深挖增补：MJZ 全量库×2、LZ 终选、svip-s 全量镜像（经筛选复验后并入）。
-# 注意：LZ 的「电信联通」双网系列（ubest/ufull）同时供 ct 与 cu 两个池子使用。
-TRI_PROXY_SOURCES = {
-    "ct": [
-        # MJZ 电信实测（每 45 分钟更新）
-        {"name": "MJZ 电信", "url": "https://cf.junzhen.qzz.io/best_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
-        # MJZ 电信全量库（北京视角；2026-09-27 深挖并入）
-        {"name": "MJZ 电信全量", "url": "https://cf.junzhen.qzz.io/full_ips_bj.txt", "port443_only": True, "carriers": ["电信"]},
-        # LZ 电信实测（每 2 小时更新，四川）
-        {"name": "LZ 电信", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["电信"]},
-        {"name": "LZ 电信全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["电信"]},
-        # LZ 电信联通双网（同时供 ct / cu）
-        {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["电信"]},
-        {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["电信"]},
-        # LZ 终选（人工终选小名单，供共识加权）
-        {"name": "LZ 终选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/final_ips.txt", "port443_only": True, "carriers": ["电信"]},
-    ],
-    "cu": [
-        # MJZ 联通实测（每 45 分钟更新）
-        {"name": "MJZ 联通", "url": "https://cf.junzhen.qzz.io/best_ips.txt", "port443_only": True, "carriers": ["联通"]},
-        # MJZ 联通全量库（2026-09-27 深挖并入）
-        {"name": "MJZ 联通全量", "url": "https://cf.junzhen.qzz.io/full_ips.txt", "port443_only": True, "carriers": ["联通"]},
-        # LZ 电信联通双网（站方在 bestcf 导航站将其标注为联通向）
-        {"name": "LZ 双网优选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
-        {"name": "LZ 双网全量", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ufull_ips.txt", "port443_only": True, "carriers": ["联通"]},
-        # LZ 终选（人工终选小名单，供共识加权）
-        {"name": "LZ 终选", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/final_ips.txt", "port443_only": True, "carriers": ["联通"]},
-    ],
-    "cmcc": [
-        # gaoji.uk（svip-s 项目 R2 入口，陕西移动实测）
-        {"name": "gaoji 移动", "url": "https://ips.gaoji.uk/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
-        {"name": "gaoji 移动全量", "url": "https://ips.gaoji.uk/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
-        # svip-s GitHub 镜像入口（同一项目，R2 不可达时兜底）
-        {"name": "svip-s 移动", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt", "port443_only": True, "carriers": ["移动"]},
-        {"name": "svip-s 移动全量", "url": "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/full_ips.txt", "port443_only": True, "carriers": ["移动"]},
-    ],
-}
-
 # Cloudflare 官方 IPv4 网段（官方清单：https://www.cloudflare.com/ips-v4）
 CF_V4_RANGES = [
     "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
@@ -164,11 +135,6 @@ _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 # 输出上限
 MAX_IPS = 50        # ip.txt（官方优选；只供外部引用不进 DNS，无配额约束）
 MAX_PROXY_IPS = 30  # proxy.txt（进 DNS 的反代池；zone 记录配额约 200，取 30 预留余量）
-# 三网反代（ct/cu/cmcc）「优质 20」方案：存活验证后对头部候选做 3 次 TCP 实测复验（≥2/3 通过）再取前 20
-TRI_FINAL_N = 20      # 三网反代域名最终写入的记录数（2026-09-27 定型：优质 20）
-TRI_VERIFY_TOP = 150  # 参与存活验证的候选数（按分数取头部）
-TRI_PROBE_BATCH = 40  # 复验每批数量（分批做，凑够 20 即停）
-TRI_PROBE_MAX = 80    # 复验最多检查的候选数（超出未凑够则用单验存活补足）
 TIMEOUT = 20
 RETRIES = 2
 
@@ -320,25 +286,6 @@ def alive_check(ips, timeout=5, workers=20):
     return [ip for ip, ok in zip(ips, flags) if ok]
 
 
-def tcp_probe(ip, tries=3, timeout=3.0):
-    """对单个 IP 做多次 TCP 443 探测，返回 (成功次数, 中位延迟 ms)。
-
-    用于三网反代的「3 次实测复验」：单次连接可能受抖动/假活影响，成功 ≥2 次才入选。
-    """
-    ok = 0
-    vals = []
-    for _ in range(tries):
-        try:
-            t0 = time.perf_counter()
-            with socket.create_connection((ip, 443), timeout=timeout):
-                vals.append((time.perf_counter() - t0) * 1000)
-                ok += 1
-        except Exception:  # noqa: BLE001
-            pass
-    med = sorted(vals)[len(vals) // 2] if vals else None
-    return ok, med
-
-
 def run_collection(sources, extract, label):
     """跑一组数据源。返回 (按优先级去重后的 IP 列表, 可用源数量, 逐 IP 信息表)。"""
     merged = []
@@ -455,51 +402,6 @@ def main() -> int:
         else:
             print(f"[反代] 警告：反代源大面积异常（{ok}/{len(PROXY_SOURCES)} 可用，仅 {len(proxies)} 个 IP），"
                   "保留旧 proxy.txt（不影响官方域名维护）")
-
-    # 三网反代池（按运营商分池；随反代批次一起跑）
-    # 「优质 20」方案（2026-09-27 定稿）：存活验证 + 头部候选 3 次 TCP 实测复验（≥2/3 通过），最终取 20
-    if scope in ("all", "proxy"):
-        for key, src_list in TRI_PROXY_SOURCES.items():
-            tri, ok, tinfo = run_collection(
-                src_list, lambda t, s: extract_proxy_ips(t, s.get("port443_only", False)), f"三网-{key}")
-            if ok >= min_sources_ok(len(src_list)) and len(tri) >= 5:
-                ranked = sorted(tri,
-                                key=lambda ip: (-score_of(tinfo[ip]), tuple(int(p) for p in ip.split("."))))
-                to_verify = ranked[:TRI_VERIFY_TOP]
-                print(f"[三网-{key}] 存活验证 {len(to_verify)} 个候选（TCP 443，并发）...")
-                alive = alive_check(to_verify, workers=30)
-                print(f"[三网-{key}] 存活 {len(alive)}/{len(to_verify)}")
-                if len(alive) >= 5:
-                    # 3 次实测复验：分批对头部候选做 3 次 TCP 探测，≥2 次成功才算「实」
-                    solid = []
-                    probed = 0
-                    while len(solid) < TRI_FINAL_N and probed < len(alive) and probed < TRI_PROBE_MAX:
-                        batch = alive[probed:probed + TRI_PROBE_BATCH]
-                        with ThreadPoolExecutor(max_workers=30) as ex:
-                            results = list(ex.map(tcp_probe, batch))
-                        solid += [ip for ip, (p_ok, _) in zip(batch, results) if p_ok >= 2]
-                        probed += len(batch)
-                        print(f"[三网-{key}] 复验 {probed} 个，通过 {len(solid)} 个")
-                    if len(solid) < TRI_FINAL_N:
-                        fill = [ip for ip in alive[probed:] if ip not in solid]
-                        print(f"[三网-{key}] 警告：复验通过仅 {len(solid)} 个（<{TRI_FINAL_N}），"
-                              f"用单验存活补足 {min(len(fill), TRI_FINAL_N - len(solid))} 个")
-                        solid += fill
-                    final = solid[:TRI_FINAL_N]
-                else:
-                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 {TRI_FINAL_N}")
-                    final = ranked[:TRI_FINAL_N]
-                write_file(f"proxy-{key}.txt", final, TRI_FINAL_N)
-                print(f"[三网-{key}] 打分 Top5：")
-                for ip in final[:5]:
-                    ent = tinfo[ip]
-                    lat = f"{ent['latency']:.0f}ms" if ent["latency"] is not None else "-"
-                    spd = f"{ent['speed']:.1f}MB/s" if ent["speed"] is not None else "-"
-                    nets = "/".join(sorted(ent["carriers"])) if ent["carriers"] else "-"
-                    print(f"  {ip:18s} 分数{score_of(ent):6.1f} | 来源{len(ent['sources'])} | 三网{nets} | {lat} {spd}")
-            else:
-                print(f"[三网-{key}] 警告：源异常（{ok}/{len(src_list)} 可用，仅 {len(tri)} 个 IP），"
-                      f"保留旧 proxy-{key}.txt 不动")
 
     return rc
 

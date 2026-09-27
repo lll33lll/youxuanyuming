@@ -9,9 +9,9 @@
 安全设计：
 - 只管理自己创建的记录（按 DNS 记录 comment 识别），不会动你手工加的记录
 - 新列表少于 2 个 IP 时直接跳过该域名（数据源抽风也不会把你现有记录清空）
-- 每域名记录数上限：默认 30；三网 ct/cu/cmcc 为 20（「优质 20」方案，2026-09-27 起）——zone 记录配额约 200：cf 13 + 30 + 20×3 = 103 留余量
+- 每域名记录数上限：默认 30（zone 记录配额约 200：cf 13 + proxy 30 = 43，余量充足）
 - 支持 --dry-run 只打印计划不实际改动
-- 支持 --only 指定范围：all=全部 / official=官方域名(cf) / proxy=反代域名(proxy/ct/cu/cmcc)
+- 支持 --only 指定范围：all=全部 / official=官方域名(cf) / proxy=反代域名(proxy)
 
 来源格式：
 - http(s):// 开头 → 抓取网页/接口提取 IP
@@ -41,7 +41,7 @@ import urllib.request
 
 API_BASE = "https://api.cloudflare.com/client/v4"
 MANAGED_COMMENT = "managed-by:youxuanyuming"
-MAX_RECORDS = 30  # 默认每域名记录上限（A 与 AAAA 各自计算）；可被域名配置 max_records 覆盖（三网为 20）
+MAX_RECORDS = 30  # 默认每域名记录上限（A 与 AAAA 各自计算）；可被域名配置 max_records 覆盖
 TIMEOUT = 30
 
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
@@ -62,12 +62,8 @@ SUBDOMAIN_IP_SOURCES = {
         "only_ranges": ["172.64.229.0/24"],
     },
     # 反代节点：第三方架设的中转 IP（流量会经过第三方服务器，自担风险）
+    # 2026-09-28 起含原三网分运营商实测源（MJZ/LZ/gaoji/svip-s 并入 proxy.txt 统一打分取 Top 30）
     "proxy": {"sources": ["proxy.txt"], "cf_only": False},
-    # 三网反代：按运营商分池的反代 IP（来源为 bestcf 导航站收录的分运营商实测源）
-    # 「优质 20」方案（2026-09-27 起）：collect_ips 侧已 3 次实测复验，这里 max_records=20 再兜底
-    "ct": {"sources": ["proxy-ct.txt"], "cf_only": False, "max_records": 20},
-    "cu": {"sources": ["proxy-cu.txt"], "cf_only": False, "max_records": 20},
-    "cmcc": {"sources": ["proxy-cmcc.txt"], "cf_only": False, "max_records": 20},
 }
 
 IP_PATTERN = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
