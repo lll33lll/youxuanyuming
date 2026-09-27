@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-采集 Cloudflare 优选 IPv4，产出两个文件：
+采集 Cloudflare 优选 IPv4，产出三组文件：
 
-- ip.txt    官方网段优选 IP（cf. / cloudflare. 域名用，只保留 CF 官方网段）
-- proxy.txt 第三方反代节点 IP（proxy. 域名用）
+- ip.txt                官方网段优选 IP（只保留 CF 官方网段；供 cf. 域名与外部引用）
+- proxy.txt             第三方反代节点 IP（proxy. 域名用）
+- proxy-ct/cu/cmcc.txt  三网反代节点 IP（ct./cu./cmcc. 域名用；按运营商分池）
 
 用法：python collect_ips.py [official|proxy|all]（默认 all）
 
