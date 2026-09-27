@@ -120,7 +120,7 @@ class CFError(Exception):
 
 
 def cf(method: str, path: str, body=None):
-    """调用 Cloudflare API，失败抛 CFError。"""
+    """调用 Cloudflare API，失败抛 CFError；瞬时错误（网络抖动/5xx/429）自动重试 3 次。"""
     url = API_BASE + path
     headers = dict(HEADERS)
     headers["Authorization"] = "Bearer " + os.environ["CF_API_TOKEN"]
@@ -128,18 +128,25 @@ def cf(method: str, path: str, body=None):
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            payload = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:500]
-        raise CFError(f"HTTP {e.code} {method} {path}: {detail}") from e
-    except Exception as e:  # noqa: BLE001
-        raise CFError(f"{type(e).__name__} {method} {path}: {e}") from e
-    if not payload.get("success"):
-        raise CFError(f"API 失败 {method} {path}: {json.dumps(payload.get('errors', []))[:500]}")
-    return payload.get("result")
+    last_err = None
+    for attempt in range(3):
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode())
+            if not payload.get("success"):
+                raise CFError(f"API 失败 {method} {path}: {json.dumps(payload.get('errors', []))[:500]}")
+            return payload.get("result")
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", "replace")[:500]
+            last_err = CFError(f"HTTP {e.code} {method} {path}: {detail}")
+            if e.code < 500 and e.code != 429:  # 非瞬时错误（权限/参数），不重试
+                break
+        except Exception as e:  # noqa: BLE001
+            last_err = CFError(f"{type(e).__name__} {method} {path}: {e}")
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+    raise last_err
 
 
 def resolve_dns_multi(hostname: str) -> str:
@@ -338,6 +345,7 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
                 "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
             })
             print(f"  已新增: {rtype} {ip}")
+            time.sleep(0.2)  # 平滑写入，避免批量创建触发 API 限流（首轮曾于第 ~130 条中断）
     for r in to_delete + to_delete6:
         cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
         print(f"  已删除: {r['content']}")

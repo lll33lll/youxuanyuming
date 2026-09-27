@@ -95,6 +95,7 @@ jobs:
           python bestdomain.py --only "$SCOPE"
 
       - name: 清理已停用子域 cloudflare.223226.xyz（临时步骤，清理完成后移除）
+        if: always()
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_NAME: 223226.xyz
