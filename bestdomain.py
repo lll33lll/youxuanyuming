@@ -52,11 +52,18 @@ SUBDOMAIN_IP_SOURCES = {
     #   saas.sin.fan 只采集电信视角（联通/移动视角不查不产；三网全收与视角级过滤实验均已回退）；
     #   only_ranges 白名单保留作保险（任何来源的非 229 段一律拒绝）
     #   此前先后撤掉 ip.164746.xyz、CloudFlareYes 电信与 dns-multi（wetest.vip 2026-09-07 改版 JS 渲染后已移除）
+    #   2026-09-28 六域名深挖增补：接入四个中国视角 229 入口（eii.at / www.wuduanyun.com /
+    #   cf.877774.xyz / cf.cnno.de）——见 README「229 段六域名深挖增补」；
+    #   www.galgamex.net 与 cf.3666888.xyz 链无 229 记录（104.16.150/151.x、104.17.188.x 等池）未接入
     "cf": {
         "sources": [
             "static:172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
             "ecs-multi:saas.sin.fan",
             "dns:ct.877774.xyz",   # QMS 电信（172.64.229.x 批量 8 条）
+            "ecs-multi:eii.at",             # 2026-09-28 深挖：saas 同链别名（电信视角 229.10/66/235）
+            "ecs-multi:www.wuduanyun.com",  # 2026-09-28 深挖：→blinkloop→cf.877774（中国视角 229 批量 8 条）
+            "ecs-multi:cf.877774.xyz",      # 2026-09-28 深挖：QMS 根域（中国视角 229 批量；海外视角 wto 记录由 only_ranges 过滤）
+            "ecs-multi:cf.cnno.de",         # 2026-09-28 深挖：cnno.de 的 cf 别名（电信视角 229.10/66/235）
         ],
         "cf_only": True,
         "only_ranges": ["172.64.229.0/24"],
