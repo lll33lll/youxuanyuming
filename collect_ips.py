@@ -15,7 +15,7 @@
   与速度 mb/mbps/M（越快越好，最高 +50）
 - 多源共识（每个独立来源 +10）：被越多数据源同时收录，说明各家测试都认可
 - 存活验证：写入前对候选做 TCP 443 连通测试（并发），死 IP 不入库
-- 最终按总分排序取前 50
+- 最终按总分排序：官方池取前 50（不进 DNS），反代池与三网池取前 30（zone 记录配额约 200 条，预留余量）
 （注：runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注）
 
 其他特点：
@@ -152,8 +152,8 @@ WARP_V4_RANGES = ["162.159.192.0/21"]
 _WARP_NETS = tuple(ipaddress.ip_network(n) for n in WARP_V4_RANGES)
 
 # 输出上限
-MAX_IPS = 50        # ip.txt（官方优选，打分排序取前 50）
-MAX_PROXY_IPS = 50  # proxy.txt（反代，打分排序取前 50）
+MAX_IPS = 50        # ip.txt（官方优选；只供外部引用不进 DNS，无配额约束）
+MAX_PROXY_IPS = 30  # proxy/ct/cu/cmcc.txt（进 DNS 的反代池；zone 记录配额约 200，取 30 预留余量）
 TIMEOUT = 20
 RETRIES = 2
 
@@ -407,7 +407,7 @@ def main() -> int:
             if len(alive) >= 10:
                 final = alive[:MAX_PROXY_IPS]
             else:
-                print("[反代] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 50")
+                print(f"[反代] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 {MAX_PROXY_IPS}")
                 final = ranked[:MAX_PROXY_IPS]
             write_file("proxy.txt", final, MAX_PROXY_IPS)
             print("[反代] 三网质量打分 Top10：")
@@ -437,7 +437,7 @@ def main() -> int:
                 if len(alive) >= 5:
                     final = alive[:MAX_PROXY_IPS]
                 else:
-                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 50")
+                    print(f"[三网-{key}] 警告：存活数过少（疑似网络故障），跳过存活过滤按分数取前 {MAX_PROXY_IPS}")
                     final = ranked[:MAX_PROXY_IPS]
                 write_file(f"proxy-{key}.txt", final, MAX_PROXY_IPS)
                 print(f"[三网-{key}] 打分 Top5：")

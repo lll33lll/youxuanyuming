@@ -41,7 +41,7 @@ import urllib.request
 
 API_BASE = "https://api.cloudflare.com/client/v4"
 MANAGED_COMMENT = "managed-by:youxuanyuming"
-MAX_RECORDS = 50  # 每个域名的记录上限（A 与 AAAA 各自计算）
+MAX_RECORDS = 30  # 每个域名的记录上限（A 与 AAAA 各自计算）；zone 记录配额约 200：cf 13 + 4×30 = 133 留余量
 TIMEOUT = 30
 
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
@@ -345,31 +345,45 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
         print(f"[{fqdn}] dry-run 模式，未实际改动")
         return
 
-    # 2. 先加后删（保证任意时刻域名都有记录可解析）；
-    #    单条操作失败不中断（记录到 dns-error.log 后继续），避免个别被拒的 IP 拖垮整批
+    # 2. 平滑更新记录；单条操作失败不中断（记录到 dns-error.log 后继续）。
+    #    顺序策略：净扩张时先加后删（保证任意时刻域名都有记录可解析）；
+    #    净收缩时先删后加（避免新增时撞 zone 记录配额的天花板，错误码 81045）。
     failed = 0
-    for rtype, ips in (("A", to_add), ("AAAA", to_add6)):
-        for ip in ips:
+
+    def _do_add():
+        nonlocal failed
+        for rtype, ips in (("A", to_add), ("AAAA", to_add6)):
+            for ip in ips:
+                try:
+                    cf("POST", f"/zones/{zone_id}/dns_records", {
+                        "type": rtype, "name": fqdn, "content": ip,
+                        "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
+                    })
+                    print(f"  已新增: {rtype} {ip}")
+                except CFError as e:
+                    failed += 1
+                    print(f"  [单条失败] 新增 {rtype} {ip}: {e}")
+                    log_error(f"{fqdn} 新增 {rtype} {ip} 失败: {e}")
+                time.sleep(0.2)  # 平滑写入，避免批量写入触发 API 限制
+
+    def _do_del():
+        nonlocal failed
+        for r in to_delete + to_delete6:
             try:
-                cf("POST", f"/zones/{zone_id}/dns_records", {
-                    "type": rtype, "name": fqdn, "content": ip,
-                    "ttl": 1, "proxied": False, "comment": MANAGED_COMMENT,
-                })
-                print(f"  已新增: {rtype} {ip}")
+                cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
+                print(f"  已删除: {r['content']}")
             except CFError as e:
                 failed += 1
-                print(f"  [单条失败] 新增 {rtype} {ip}: {e}")
-                log_error(f"{fqdn} 新增 {rtype} {ip} 失败: {e}")
-            time.sleep(0.2)  # 平滑写入，避免批量创建触发 API 写限制
-    for r in to_delete + to_delete6:
-        try:
-            cf("DELETE", f"/zones/{zone_id}/dns_records/{r['id']}")
-            print(f"  已删除: {r['content']}")
-        except CFError as e:
-            failed += 1
-            print(f"  [单条失败] 删除 {r['content']}: {e}")
-            log_error(f"{fqdn} 删除 {r['content']} 失败: {e}")
-        time.sleep(0.2)
+                print(f"  [单条失败] 删除 {r['content']}: {e}")
+                log_error(f"{fqdn} 删除 {r['content']} 失败: {e}")
+            time.sleep(0.2)
+
+    if (len(to_delete) + len(to_delete6)) > (len(to_add) + len(to_add6)):
+        _do_del()
+        _do_add()
+    else:
+        _do_add()
+        _do_del()
     if failed:
         log_error(f"{fqdn}: 本次共 {failed} 条单条操作失败（已跳过，未中断其他域名）")
 
