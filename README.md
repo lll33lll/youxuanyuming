@@ -17,14 +17,14 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [saas.sin.fan](https://saas.sin.fan) SIN 优选域名 · 三网 ECS 解析（电信/联通/移动视角全池）+ [QMS 三网域名](https://ct.877774.xyz)（ct/cu/cmcc.877774.xyz 批量）；static 锁定 5 条保留 | 官方网段·精选，每 3 小时 |
+| `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 5 条 + [saas.sin.fan](https://saas.sin.fan) 电信视角（`ecs-multi` 经 `only_ranges` 收窄）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 | 官方网段·精选，每 3 小时 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（16 源候选池 → 三网质量打分 + 存活验证，取 Top 50） | 官方网段·质量优选，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（15 源候选池 → 三网质量打分 + 存活验证，取 Top 50；Xgonce/gaoji/MJZ/Xiaobei09 带实测数值） | **第三方反代节点**，每 1 小时 |
 
 > ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
 
 `ip.txt` 的候选数据源（16 个，合并去重后按三网质量打分取 Top 50）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、vvhan 三网、NiREvil 三网、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com（带电信实测延迟/速度数值）、wetest.vip（已改版 JS 渲染，无静态数据）。
-`proxy.txt` 的候选数据源（15 个，合并去重后按三网质量打分取 Top 50，只取 443 端口）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测，带速度）、gaoji.uk 移动实测（带延迟/速度）、LZ 联通实测、Xiaobei09 二筛稳定版（带延迟/速度）、**Xgonce 实测库**（每 6 小时，CSV 自带速度+TLS 延迟）、LancelotRar 聚合、YuTian、Mia、洛璃、天诚、S5公益、Laziji、CM IP库（万级大池子）。
+`proxy.txt` 的候选数据源（15 个，合并去重后按三网质量打分取 Top 50，只取 443 端口）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测，带速度）、gaoji.uk 移动实测（带延迟/速度）、LZ 联通实测、Xiaobei09 二筛稳定版（带延迟/速度）、**Xgonce 实测库**（每 6 小时，CSV 自带速度+TCP/TLS 延迟）、LancelotRar 聚合、YuTian、Mia、洛璃、天诚、S5公益、Laziji、CM IP库（万级大池子）。
 
 来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。已排查并排除的伪优选域名：cf.877774.xyz（CNAME 蹭 www.wto.org 橙云记录）、youxuan.cf.090227.xyz（轮换 CNAME 到 Coinbase/Udacity CDN）、cf.3666888.xyz（GeoDNS 分地区，海外视角拿不到国内记录）。
 
@@ -108,7 +108,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增「三网 ECS 视角采集」源型（ecs-multi 型源）：以运营商代表性 IP 作 EDNS Client Subnet 解析 GeoDNS 优选域名，收全电信/联通/移动各自分线路记录
 - 同步频率拆分：官方池每 3 小时、反代池每 1 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时保留旧文件不动，防止网络故障时把池子砍残
-- `cf` 域名源定型：SIN 优选域名 **三网 ECS 解析**（新增 `ecs-multi` 源型：以电信/联通/移动代表性 IP 作 EDNS Client Subnet 查询，收全三网各自池子——电信 229.x、联通 152/156.x、移动 104.x/153.74）+ **QMS 三网域名**（ct/cu/cmcc.877774.xyz，固定批量：电信 229.x 8 条、移动 104.16.148/149.x 26 条）；static 锁定 5 条保留不动；2026-09-27 迭代路径：撤 ipTop10/CloudFlareYes → 只留 saas.sin.fan → 短暂收紧 229 段（引入 `only_ranges` 机制）→ 改为三网全池 → 追加 QMS 第二数据源（wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
+- `cf` 域名源定型：**仅 172.64.229.x 段**（电信）——static 锁定 5 条 + saas.sin.fan 电信视角（`ecs-multi` 经 `only_ranges` 收窄）+ ct.877774.xyz 批量（8 条）；2026-09-27 迭代路径：撤 ipTop10/CloudFlareYes → 只留 saas.sin.fan → 收紧 229 段 → 三网全池实验 → 追加 QMS 三网源 → **最终收窄回纯 229 段**（三网实验的联通/移动产出与 cu/cmcc 源已撤掉；wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
 - `ip.txt` 与 `proxy.txt` 筛选改为**三网质量打分制**：三网覆盖标签 + 实测延迟/速度数值（uouin/Xgonce CSV/gaoji/MJZ/Xiaobei09）+ 多源共识 + TCP 443 存活验证，综合排序取 Top 50（取代按来源优先级截取；uouin 的 HTML 表格按 `<tr>` 行块解析出运营商/延迟/带宽，Xgonce 的 CSV 转标准行格式）；反代源扩充到 15 个（新增 Xgonce 实测 CSV、YuTian、Mia、洛璃、天诚、CM IP库）
 
 ## 开源协议
