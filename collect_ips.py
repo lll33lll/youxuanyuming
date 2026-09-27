@@ -42,16 +42,23 @@ SOURCES = [
     {"name": "ip.164746.xyz Top10", "url": "https://ip.164746.xyz/ipTop10.html"},
     # CloudFlareYes 电信优选（纯文本）
     {"name": "addressesapi 电信", "url": "https://addressesapi.090227.xyz/ct", "carriers": ["电信"]},
-    # 090227 三网分类接口（电信/移动/联通）
-    {"name": "cf.090227 电信", "url": "https://cf.090227.xyz/ct?ips=6", "carriers": ["电信"]},
-    {"name": "cf.090227 移动", "url": "https://cf.090227.xyz/cmcc?ips=8", "carriers": ["移动"]},
-    {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu", "carriers": ["联通"]},
+    # 090227 三网分类接口（电信/移动/联通；ips 参数控制条数）
+    {"name": "cf.090227 电信", "url": "https://cf.090227.xyz/ct?ips=50", "carriers": ["电信"]},
+    {"name": "cf.090227 移动", "url": "https://cf.090227.xyz/cmcc?ips=50", "carriers": ["移动"]},
+    {"name": "cf.090227 联通", "url": "https://cf.090227.xyz/cu?ips=50", "carriers": ["联通"]},
+    # 090227 实时三网 API（bestcf 站自产、每请求实时生成；与上面接口抽样互补）
+    {"name": "090227 实时电信", "url": "https://090227.pages.dev/bestcf?isp=ct&ips=50", "carriers": ["电信"]},
+    {"name": "090227 实时联通", "url": "https://090227.pages.dev/bestcf?isp=cu&ips=50", "carriers": ["联通"]},
+    {"name": "090227 实时移动", "url": "https://090227.pages.dev/bestcf?isp=cmcc&ips=50", "carriers": ["移动"]},
     # CloudFlareYes 三网（CM API 备用入口）
     {"name": "CloudFlareYes 三网", "url": "https://addressesapi.090227.xyz/CloudFlareYes",
      "carriers": ["电信", "联通", "移动"]},
     # 以下为 bestcf.pages.dev 导航站收录的优选源（多为三网实测，行内带运营商标签）
     {"name": "vvhan 三网", "url": "https://bestcf.pages.dev/vvhan/ipv4.txt"},
     {"name": "NiREvil 三网", "url": "https://bestcf.pages.dev/nirevil/ipv4.txt"},
+    {"name": "微测网镜像", "url": "https://bestcf.pages.dev/wetest/ipv4.txt"},
+    {"name": "cfyes 镜像", "url": "https://bestcf.pages.dev/cfyes/ipv4.txt"},
+    {"name": "ircf 镜像", "url": "https://bestcf.pages.dev/ircf/ipv4.txt"},
     {"name": "天诚 三网", "url": "https://raw.githubusercontent.com/gshtwy/CF-DNS-Clone/refs/heads/main/wetest-cloudflare-v4.txt"},
     {"name": "Senflare", "url": "https://raw.githubusercontent.com/Senflare/Senflare-IP/refs/heads/main/IPlist-Pro.txt"},
     {"name": "Einsitang", "url": "https://raw.githubusercontent.com/einsitang/my-fast-cf-ip/refs/heads/master/fastips.txt"},
@@ -59,8 +66,10 @@ SOURCES = [
     {"name": "Joname 聚合", "url": "https://raw.githubusercontent.com/joname1/BestCFip/refs/heads/main/ipv4.txt"},
     # 麒麟域名检测优选（HTML 表格，带电信标签 + 延迟/速度实测数值）
     {"name": "api.uouin.com", "url": "https://api.uouin.com/cloudflare.html"},
-    # 微测网优选 IPv4（HTML 表格；2026-09-07 改版 JS 渲染后已无静态数据，保留占位）
-    {"name": "wetest.vip", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
+    # 麒麟静态镜像（bestcf.pages.dev 维护，带电信延迟/速度数值；防官网改版）
+    {"name": "uouin 镜像", "url": "https://bestcf.pages.dev/uouin/all.txt"},
+    # 微测网优选 IPv4（HTML 表格，带三网标签 + 带宽/速度；2026-09-27 复核已恢复静态数据）
+    {"name": "微测网 HTML", "url": "https://www.wetest.vip/page/cloudflare/address_v4.html"},
 ]
 
 # ============ 反代 IP 数据源（第三方架设的中转节点，流量会经过第三方服务器）============
@@ -78,16 +87,18 @@ PROXY_SOURCES = [
     {"name": "LZ 联通", "url": "https://raw.githubusercontent.com/love-ztm/cfip/refs/heads/main/ubest_ips.txt", "port443_only": True, "carriers": ["联通"]},
     # Xiaobei09 二筛稳定版（带延迟/速度标注 "28ms-27.40MB/s"）
     {"name": "Xiaobei09 稳定", "url": "https://raw.githubusercontent.com/Xiaobei09/ProxyIP/main/data/valid/all_46_ltd_stable.txt", "port443_only": True},
+    # Xiaobei09 全量版（600+ 条 443 节点，带地区/速度标注；与稳定版为不同数据集，交集极小）
+    {"name": "Xiaobei09 全量", "url": "https://raw.githubusercontent.com/Xiaobei09/proxyip/refs/heads/main/data/valid/all_ltd.txt", "port443_only": True},
     # Xgonce 实测库（每 6 小时，CSV 格式自带速度+TCP/TLS 延迟，转换成标准行格式）
     {"name": "Xgonce 实测", "url": "https://raw.githubusercontent.com/xgonce/Cloudflare_IP/refs/heads/main/result.csv",
      "port443_only": True, "csv": "xgonce"},
-    # 多项目聚合 bestips（每 3 小时更新，量大兜底）
-    {"name": "LancelotRar 聚合", "url": "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ipv4.txt", "port443_only": True},
     # 以下为 bestcf.pages.dev 导航站收录的优选源（地区标注，作候选池）
     {"name": "YuTian", "url": "https://bestcf.pages.dev/yutian/all.txt", "port443_only": True},
     {"name": "Mia", "url": "https://bestcf.pages.dev/xinyitang3/ipv4.txt", "port443_only": True},
     {"name": "洛璃", "url": "https://bestcf.pages.dev/luoli/all.txt", "port443_only": True},
     {"name": "天诚", "url": "https://bestcf.pages.dev/tiancheng/all.txt", "port443_only": True},
+    {"name": "天诚2 港岛", "url": "https://bestcf.pages.dev/tiancheng2/all.txt", "port443_only": True},
+    {"name": "天诚3", "url": "https://bestcf.pages.dev/tiancheng3/all.txt", "port443_only": True},
     {"name": "S5公益", "url": "https://bestcf.pages.dev/s5gy/all.txt", "port443_only": True},
     {"name": "Laziji", "url": "https://bestcf.pages.dev/lzj/all.txt", "port443_only": True},
     # CM IP库（大池子兜底，1 万+ 条）
@@ -211,7 +222,7 @@ def enrich_info(info, text, src_carriers):
     """从源文本提取三网标签与延迟/速度数值，更新到 info。
 
     按行或 HTML 表格行（<tr>）分块；块内出现 电信/联通/移动 记运营商覆盖，
-    出现 "136.85ms" 记延迟、“55.36mb"/“6.92mb/s"/“9.85Mbps"/“13M” 记速度（多块取最优值）。
+    出现 "136.85ms" 记延迟、“55.36mb”/“6.92mb/s”/“9.85Mbps”/“13M” 记速度（多块取最优值）。
     uouin 的 HTML 表格里运营商、IP、延迟、带宽同在一个 <tr> 行内（每个 <td>
     内部有换行），必须按 <tr> 整行切块而不是按换行切。
     """
