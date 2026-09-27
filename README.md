@@ -17,7 +17,7 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | [saas.sin.fan](https://saas.sin.fan) SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现） | 官方网段·精选，每 3 小时 |
+| `cf.223226.xyz` | [saas.sin.fan](https://saas.sin.fan) SIN 优选域名 · **仅 172.64.229.x 段**（static 锁定 5 条 IPv4 + dns-multi 自动发现，`only_ranges` 白名单收窄） | 官方网段·精选，每 3 小时 |
 | `cloudflare.223226.xyz` | 本仓库 `ip.txt`（16 源候选池 → 三网质量打分 + 存活验证，取 Top 50） | 官方网段·质量优选，每 3 小时 |
 | `proxy.223226.xyz` | 本仓库 `proxy.txt`（15 源候选池 → 三网质量打分 + 存活验证，取 Top 50；Xgonce/gaoji/MJZ/Xiaobei09 带实测数值） | **第三方反代节点**，每 1 小时 |
 
@@ -107,7 +107,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - 新增「多视角 DNS 采集」源型（dns-multi 型源）与「固定 IP 列表」源型（static 型源）
 - 同步频率拆分：官方池每 3 小时、反代池每 1 小时（同一 workflow 两个 cron 批次，按触发的 cron 区分范围）
 - 采集增加「源大面积异常」守卫：可用源少于 1/4 或结果少于 10 个时保留旧文件不动，防止网络故障时把池子砍残
-- `cf` 域名源定型：SIN 优选域名（static 锁定 9 条 IPv4 多视角 IP + dns-multi 自动发现），2026-09-27 起只保留 saas.sin.fan 单一来源（此前为 ipTop10 + SIN + CloudFlareYes 电信，wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
+- `cf` 域名源定型：SIN 优选域名、**仅 172.64.229.x 段**（static 锁定 5 条 IPv4 + dns-multi 自动发现，新增 `only_ranges` 段白名单机制）；2026-09-27 先撤掉 ipTop10 与 CloudFlareYes 电信（只留 saas.sin.fan），再收紧为只保留 172.64.229.x（去掉 162.x 与其它 172.x；wetest 原站 2026-09-07 改版 JS 渲染后已移除）；含 **AAAA（IPv6）记录支持**（v4→A、v6→AAAA 双轨维护，v6 限 CF 官方 2606:4700:: 等网段；当前未启用 v6）
 - `ip.txt` 与 `proxy.txt` 筛选改为**三网质量打分制**：三网覆盖标签 + 实测延迟/速度数值（uouin/Xgonce CSV/gaoji/MJZ/Xiaobei09）+ 多源共识 + TCP 443 存活验证，综合排序取 Top 50（取代按来源优先级截取；uouin 的 HTML 表格按 `<tr>` 行块解析出运营商/延迟/带宽，Xgonce 的 CSV 转标准行格式）；反代源扩充到 15 个（新增 Xgonce 实测 CSV、YuTian、Mia、洛璃、天诚、CM IP库）
 
 ## 开源协议

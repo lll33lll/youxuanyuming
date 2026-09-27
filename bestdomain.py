@@ -46,15 +46,17 @@ TIMEOUT = 30
 # 域名 -> 配置。sources 里 http(s):// 开头则抓取，dns:/dns-multi:/static: 开头则按对应方式取 IP，否则按本地文件读取；
 # cf_only=True 表示只接受 Cloudflare 官方网段的 IP（反代域名设为 False）
 SUBDOMAIN_IP_SOURCES = {
-    # 精选官方：仅 SIN 优选域名 saas.sin.fan（static 锁定多视角全部 9 个已知 IPv4 + dns-multi 自动发现新记录）
-    # 2026-09-27：按需求撤掉 ip.164746.xyz Top10 与 CloudFlareYes 电信两个源，只保留 saas.sin.fan
+    # 精选官方：仅 SIN 优选域名 saas.sin.fan，且只收 172.64.229.x 段
+    # （static 锁定 5 条已知 IPv4 + dns-multi 自动发现，经 only_ranges 白名单收窄）
+    # 2026-09-27：先撤掉 ip.164746.xyz Top10 与 CloudFlareYes 电信两个源，再按需求删掉 162.x 与其它 172.x，只留 172.64.229.x
     # （wetest.vip 原站 2026-09-07 改版 JS 渲染后已移除）
     "cf": {
         "sources": [
-            "static:162.159.130.234,162.159.135.234,172.64.152.5,172.64.156.171,172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
+            "static:172.64.229.10,172.64.229.34,172.64.229.66,172.64.229.99,172.64.229.235",
             "dns-multi:saas.sin.fan",
         ],
         "cf_only": True,
+        "only_ranges": ["172.64.229.0/24"],
     },
     # 全量官方：本仓库采集的合并列表（16 个数据源）
     "cloudflare": {"sources": ["ip.txt"], "cf_only": True},
@@ -178,7 +180,7 @@ def fetch_text(source: str) -> str:
         return f.read()
 
 
-def extract_ips(text: str, cf_only: bool = True):
+def extract_ips(text: str, cf_only: bool = True, only_nets=None):
     out = []
     for raw in IP_PATTERN.findall(text):
         try:
@@ -190,6 +192,8 @@ def extract_ips(text: str, cf_only: bool = True):
                 continue  # WARP 专用端点，不能当优选 IP
             if cf_only and not any(ip in net for net in _CF_NETS):
                 continue  # 反代/非官方网段的 IP，官方域名不用
+            if only_nets and not any(ip in net for net in only_nets):
+                continue  # only_ranges 白名单外的 IP（用于把域名收紧到指定段）
             out.append(raw)
     return out
 
@@ -223,8 +227,9 @@ def get_zone_id(zone_name: str) -> str:
 
 
 def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
-                     dry_run: bool, cf_only: bool = True):
+                     dry_run: bool, cf_only: bool = True, only_ranges=None):
     fqdn = zone_name if subdomain == "@" else f"{subdomain}.{zone_name}"
+    only_nets = tuple(ipaddress.ip_network(n) for n in only_ranges) if only_ranges else None
 
     # 1. 取新 IP 列表（多来源合并去重；IPv4 进 A 记录，IPv6 进 AAAA 记录）
     desired, desired6 = [], []
@@ -234,7 +239,7 @@ def update_subdomain(zone_id: str, zone_name: str, subdomain: str, sources,
         except Exception as e:  # noqa: BLE001
             print(f"[警告] {fqdn}: 来源 {src} 获取失败（{type(e).__name__}: {e}），跳过该来源")
             continue
-        for ip in extract_ips(text, cf_only=cf_only):
+        for ip in extract_ips(text, cf_only=cf_only, only_nets=only_nets):
             if ip not in desired:
                 desired.append(ip)
         for ip in extract_ips6(text):
@@ -330,7 +335,8 @@ def main() -> int:
         zone_id = get_zone_id(zone_name)
         for subdomain, cfg in targets.items():
             update_subdomain(zone_id, zone_name, subdomain, cfg["sources"], dry_run,
-                             cf_only=cfg.get("cf_only", True))
+                             cf_only=cfg.get("cf_only", True),
+                             only_ranges=cfg.get("only_ranges"))
             time.sleep(0.5)
     except CFError as e:
         print(f"错误：{e}")
