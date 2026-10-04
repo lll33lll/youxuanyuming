@@ -4,10 +4,17 @@ Fork 自 [jc-lw/youxuanyuming](https://github.com/jc-lw/youxuanyuming)（上游�
 
 ## 它做什么
 
-GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
+> 🔴 **2026-10-05 状态变更 — 项目已停更**
+>
+> - GitHub Actions 定时任务已停用（`.github/workflows/update.yml` 里的 cron 已注释，仅保留手动 `workflow_dispatch`）
+> - `proxy.223226.xyz` 反代域名**已下线**（30 条 DNS 记录已删除）
+> - `cf.223226.xyz` 优选域名**保留现状**（22 条 `172.64.229.x`），只是不再自动刷新
+> - 仓库内的采集脚本与数据源**未改动**，需要时可在 Actions 页面手动跑一次
 
-- **官方池**（`cf`）：每 **3 小时**换新（:17 批次）
-- **反代池**（`proxy`）：每 **1 小时**换新（:17 批次跑全量 + 每小时 :47 批次只跑反代）
+原本的工作方式（现仅手动触发时适用）：
+
+- **官方池**（`cf`）：三网质量打分 Top 50 → 写入 `cf.223226.xyz`
+- **反代池**（`proxy`）：原为每 1 小时换新（:47 批次），域名已于 2026-10-05 下线
 
 每次运行：
 
@@ -17,15 +24,17 @@ GitHub Actions 定时任务自动维护，**官方池和反代池分节奏**：
 
 | 域名 | IP 来源 | 说明 |
 | --- | --- | --- |
-| `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 10 条 + [saas.sin.fan](https://saas.sin.fan)（仅电信视角采集）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 + [eii.at](https://eii.at) / [www.wuduanyun.com](https://www.wuduanyun.com) / [cf.877774.xyz](https://cf.877774.xyz) / [cf.cnno.de](https://cf.cnno.de) / [saas.072159.xyz](https://saas.072159.xyz) / [www.5199dy.com](https://www.5199dy.com) / [tt.78607323.xyz](https://tt.78607323.xyz) / [cf.itv888.cn](https://cf.itv888.cn)（2026-09-28 两轮深挖增补，池成员 13 → 18） | 官方网段·精选，每 3 小时 |
-| `proxy.223226.xyz` | 本仓库 `proxy.txt`（26 源候选池 → 三网质量打分 + 存活验证，取 Top 30；含 MJZ 联通/电信（优选+全量）、LZ 电信/双网/终选、gaoji/svip-s 移动（优选+全量）、Xgonce/Xiaobei09 等带实测数值的源） | **第三方反代节点**，每 1 小时 |
+| `cf.223226.xyz` | **仅 172.64.229.x 段**（电信）——static 锁定 10 条 + [saas.sin.fan](https://saas.sin.fan)（仅电信视角采集）+ [ct.877774.xyz](https://ct.877774.xyz) 批量 8 条 + [eii.at](https://eii.at) / [www.wuduanyun.com](https://www.wuduanyun.com) / [cf.877774.xyz](https://cf.877774.xyz) / [cf.cnno.de](https://cf.cnno.de) / [saas.072159.xyz](https://saas.072159.xyz) / [www.5199dy.com](https://www.5199dy.com) / [tt.78607323.xyz](https://tt.78607323.xyz) / [cf.itv888.cn](https://cf.itv888.cn)（2026-09-28 两轮深挖增补，池成员 13 → 18） | 官方网段·精选。**已停更**，保留现有 22 条记录 |
+| ~~`proxy.223226.xyz`~~ | 本仓库 `proxy.txt`（26 源候选池 → 三网质量打分 + 存活验证，取 Top 30） | **已于 2026-10-05 下线**（DNS 记录已删除） |
 
-> ⚠️ **反代域名的风险须知**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），你的流量会经过这些陌生服务器，理论上可被嗅探/记录。速度可能比官方 IP 快，但请自行权衡风险，不要在上面传输敏感数据。
+> ⚠️ **反代域名的风险须知（历史）**：`proxy.223226.xyz` 里的 IP 是第三方架设的中转服务器（非 Cloudflare 官方网段），流量会经过这些陌生服务器，理论上可被嗅探/记录。该域名已于 2026-10-05 下线，此处保留说明备查。
 
 `ip.txt` 的候选数据源（23 个，合并去重后按三网质量打分取 Top 50）：IPDB bestcf、**SIN 优选域名 saas.sin.fan**（站长实测维护）、ip.164746.xyz Top10、addressesapi 电信/三网、cf.090227 三网接口、**090227 实时三网 API**（每请求实时生成）、vvhan 三网、NiREvil 三网、微测网 HTML + 静态镜像（2026-09-27 复核恢复）、cfyes 镜像、ircf 镜像、天诚三网、Senflare、Einsitang、Joname 聚合、api.uouin.com + 静态镜像（带电信实测延迟/速度数值）。
-`proxy.txt` 的候选数据源（26 个，合并去重后按三网质量打分取 Top 30，只取 443 端口）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测，带速度；各含优选 + 全量库）、LZ 电信/双网/终选（每 2 小时，四川；电信、双网各含优选 + 全量）、gaoji.uk / svip-s 陕西移动（R2 与 GitHub 双入口，优选 + 全量镜像，带延迟/速度）、Xiaobei09 稳定版 + 全量版（600+ 条，带地区/速度标注）、**Xgonce 实测库**（每 6 小时，CSV 自带速度+TCP/TLS 延迟）、YuTian、Mia、洛璃、天诚 + 天诚2/3、S5公益、Laziji、CM IP库（万级大池子）。
+> 📦 `proxy.txt` 的候选数据源（26 个，**proxy 域名已下线，以下源仅作留存**；手动运行 `all` 范围时仍会生成 `proxy.txt`，合并去重后按三网质量打分取 Top 30，只取 443 端口）：IPDB bestproxy（每小时实测）、MJZ 联通/电信（45 分钟实测，带速度；各含优选 + 全量库）、LZ 电信/双网/终选（每 2 小时，四川；电信、双网各含优选 + 全量）、gaoji.uk / svip-s 陕西移动（R2 与 GitHub 双入口，优选 + 全量镜像，带延迟/速度）、Xiaobei09 稳定版 + 全量版（600+ 条，带地区/速度标注）、**Xgonce 实测库**（每 6 小时，CSV 自带速度+TCP/TLS 延迟）、YuTian、Mia、洛璃、天诚 + 天诚2/3、S5公益、Laziji、CM IP库（万级大池子）。
 
 > 📌 **2026-09-28 变更**：原三网分运营商反代域名 `ct`/`cu`/`cmcc.223226.xyz` 已下线（DNS 记录已清理），其数据源（MJZ 电信/联通、LZ 电信/双网/终选、gaoji/svip-s 移动）全部并入 `proxy` 池统一打分，不再按运营商分池维护。
+
+> 📌 **2026-10-05 变更（停更）**：定时任务停用（cron 注释，仅保留手动触发）；`proxy.223226.xyz` 反代域名下线（30 条 DNS 记录已删除）；`cf.223226.xyz` 保留现状不再刷新；仓库采集脚本与数据源未改动。
 
 来源参考：[bestcf.pages.dev](https://bestcf.pages.dev/)（EDT 优选导航站）。已排查并排除的伪优选域名：cf.877774.xyz（CNAME 蹭 www.wto.org 橙云记录）、youxuan.cf.090227.xyz（轮换 CNAME 到 Coinbase/Udacity CDN）、cf.3666888.xyz（GeoDNS 分地区，海外视角拿不到国内记录）。（2026-09-28 复核：`cf.877774.xyz` 的中国视角解析即 229 段入口、已作为 cf 池采集源接入——「伪优选」结论仅针对客户端直接使用场景；`cf.3666888.xyz` 复核仍无 229 段记录。）
 
@@ -58,35 +67,34 @@ Fork 的 Actions 默认禁用。打开仓库 **Actions** 标签页，点绿色�
 ```bash
 nslookup -type=A cf.223226.xyz     # IPv4（A 记录）
 nslookup -type=AAAA cf.223226.xyz  # IPv6（AAAA 记录）
-nslookup proxy.223226.xyz
 ```
 
-cf 会解析出一批 172.64.229.x 的官方网段地址；`proxy.223226.xyz` 解析出的是第三方反代 IP。
+`cf.223226.xyz` 会解析出一批 172.64.229.x 的官方网段地址（当前 22 条，已停更）。
 
 ## 怎么用
 
 在代理客户端（v2rayN / Clash Meta / Shadowrocket / sing-box 等）里：
 
-- **address / server** 填 `cf.223226.xyz`（官方 IP）或 `proxy.223226.xyz`（反代 IP，需自担风险）
+- **address / server** 填 `cf.223226.xyz`（官方 IP）
 - **SNI / Host / peer** 填你真正走 CF 的域名（例如你自己的 Worker、Pages 或其它橙云域名）
 
 ## 手动运行 / 试运行
 
 Actions → **采集优选IP并更新DNS** → **Run workflow**：
 
-- **范围**选 `all`（默认，官方+反代）/ `official`（只官方）/ `proxy`（只反代）
+- **范围**选 `official`（默认，只官方）/ `all`（官方+反代，注意：会重新创建已下线的 `proxy.223226.xyz` 记录）
 - 直接运行 = 立即采集并更新 DNS
 - 勾选 **dry_run** = 只打印将要增删的记录，不实际改动
 
 ## 常见问题
 
-- **多久更新一次？** 官方池（cf）每 3 小时（UTC `17 0,3,6,...` 批次）；反代池（proxy）每 1 小时（每小时 `47 * * * *` 批次只跑反代）。想改频率就编辑 `.github/workflows/update.yml` 里的 cron。
+- **多久更新一次？** **已停更**（2026-10-05）。定时任务已停用，`.github/workflows/update.yml` 里的 cron 注释保留，需要恢复时取消注释即可；目前只能在 Actions 页面手动触发。
 - **池子的 IP 怎么选出来的？**（cf/proxy 通用）三网质量打分制：三网覆盖标签（电信/联通/移动每家 +20 分）+ 实测延迟/速度（uouin/Xgonce/gaoji/MJZ/Xiaobei09 等源带的 ms/mb 数值，延迟越低/速度越快加分）+ 多源共识（每个独立来源 +10）+ 写入前 TCP 443 存活验证（死 IP 不入库），总分排序取 Top 50（官方）/ Top 30（proxy）。注：GitHub runner 在海外无法直接测三网延迟/网速，三网数据借力各数据源自己的实测标注。
 - **会动我手工加的 DNS 记录吗？** 不会。脚本只管理自己创建的记录（带 `managed-by:youxuanyuming` 注释），你手工加的同名 A/AAAA 记录会被保留。
 - **数据源挂了怎么办？** 单个源挂了自动跳过；源大面积异常（可用源少于 1/4 或结果少于 10 个）时保留旧文件不动；两个域名各自的有效 IP 少于 2 个时会跳过更新，不会清空。
 - **为什么有的来源抓到的 IP 会变少？** 官方域名（cf）会过滤掉不属于 Cloudflare 官方网段的 IP，只保留官方网段；反代域名（proxy）只保留 443 端口的条目（非 443 端口对 DNS 优选域名无意义）。
 - **IPv6 支持吗？** 支持（IPv6 会进 AAAA 记录，与 A 记录分开维护）；当前配置未启用 v6 IP。
-- **反代 IP 是什么？** 第三方架设的中转服务器，帮你把流量转发到 Cloudflare。速度可能更快，但流量会经过陌生人的服务器，请自行权衡（见上方风险须知）。
+- **反代 IP 是什么？** 第三方架设的中转服务器，帮你把流量转发到 Cloudflare。速度可能更快，但流量会经过陌生人的服务器。相关域名 `proxy.223226.xyz` 已于 2026-10-05 下线。
 - **想换域名/加子域名？** 改 `bestdomain.py` 顶部的 `SUBDOMAIN_IP_SOURCES`，以及 workflow 里的 `CF_ZONE_NAME`。
 - **ip.txt 是什么？** 三网质量打分 Top 50（上限 50 个），可以通过
   `https://raw.githubusercontent.com/lll33lll/youxuanyuming/main/ip.txt` 直接引用。
@@ -118,6 +126,7 @@ Actions → **采集优选IP并更新DNS** → **Run workflow**：
 - **三网反代域名下线、数据源并入 proxy（2026-09-28）**：`ct`/`cu`/`cmcc.223226.xyz` 三个分运营商反代域名下线（DNS 遗留记录由一次性脚本 `retire_tri_dns.py` 清理后移除；采集与维护配置全部撤出）；原三网数据源（MJZ 电信/联通 × 优选+全量、LZ 电信/双网/终选、gaoji/svip-s 移动 × 优选+全量）并入 `proxy` 池（17 → 26 源），反代池仍按三网质量打分取 Top 30
 - **229 段六域名深挖增补（2026-09-28）**：对 `eii.at` / `www.wuduanyun.com` / `www.galgamex.net` / `cf.3666888.xyz` / `cf.877774.xyz` / `cdn.cnno.de` 做多解析器 × 多轮 + 三网 ECS 视角 + 子域枚举深挖（5 解析器 / 10 ECS 视角 / 260 候选子域）：`cf` 池新增四个 229 来源——`eii.at`（saas 同链别名）、`www.wuduanyun.com`（→ blinkloop → cf.877774）、`cf.877774.xyz`（QMS 根域）、`cf.cnno.de`（深挖发现的别名入口）；`www.galgamex.net` / `cf.3666888.xyz`（含 `9.cf`、`cfadmin` 链路，104.16.150/151.x 等池）/ `cdn.cnno.de` 本体（182682 轮换池）无 229 记录未接入。深挖结论：六域名所供 229 均为现有 13 条家族子集，未发现段内新成员
 - **229 段 28 域名深挖 R2（2026-09-28）**：对「JP 电信优选」28 域名清单做全视角深挖（5 解析器 × 多轮 + 三网 ECS ×10 视角 + 812 子域候选枚举）：**新发现 5 个 229 成员（此前 13 条家族之外）并 static 锁定——`172.64.229.45` / `.54` / `.70` / `.183` / `.237`**，池成员 13 → 18；新增 4 个全视角稳定的 dns 直取源（`saas.072159.xyz` → .45、`www.5199dy.com`（xl.chunqiu25.com 链）→ .45/.54、`tt.78607323.xyz`（cnd.igum.eu.cc 链）→ .70/.237、`cf.itv888.cn` → .183）。其余域名无 229 或为已知池别名（galgamex / 3666888 / 7zz / mfyx → 104.16.15x 池；xreak / 224322 → 172.64.52.x；fn.130519 → 162.159.38/39；cf.92555 → oofy.site；img.css.sd / cf.777791 → 104.2x；cf2.996616 / cdn.cnno → 182682 轮换池）——未接入
+- **项目停更（2026-10-05）**：注释 `update.yml` 里的两个 cron（`17 0,3,6,...` 全量 / `47 * * * *` 反代），仅保留 `workflow_dispatch` 手动触发，默认范围改为 `official`；`proxy.223226.xyz` 反代域名下线（30 条 DNS 记录删除）；`cf.223226.xyz` 保留现状；采集脚本与数据源未改动
 
 ## 开源协议
 
