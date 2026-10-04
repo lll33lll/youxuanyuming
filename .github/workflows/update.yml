@@ -1,11 +1,13 @@
 name: 采集优选IP并更新DNS
 
 on:
-  schedule:
-    # :17 批次 = 官方+反代全量（官方池 cf 每 3 小时换新）
-    - cron: '17 0,3,6,9,12,15,18,21 * * *'
-    # :47 批次 = 仅反代（反代池 proxy 每 1 小时换新）
-    - cron: '47 * * * *'
+  # 2026-10-05 应用户要求停更：定时任务已停用（下方 schedule 保留注释，需要恢复时取消注释即可）。
+  # 目前仅支持手动触发。proxy 反代域名已下线，默认只更新官方池 cf。
+  # schedule:
+  #   # :17 批次 = 官方+反代全量（官方池 cf 每 3 小时换新）
+  #   - cron: '17 0,3,6,9,12,15,18,21 * * *'
+  #   # :47 批次 = 仅反代（反代池 proxy 每 1 小时换新）
+  #   - cron: '47 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -14,14 +16,13 @@ on:
         default: false
         type: boolean
       scope:
-        description: '范围'
+        description: '范围（proxy 域名已下线，默认 official）'
         required: false
-        default: all
+        default: official
         type: choice
         options:
-          - all
           - official
-          - proxy
+          - all
 
 # 防止上一次还没跑完下一次又启动
 concurrency:
@@ -55,7 +56,7 @@ jobs:
           else
             SCOPE="${{ inputs.scope }}"
           fi
-          [ -z "$SCOPE" ] && SCOPE=all
+          [ -z "$SCOPE" ] && SCOPE=official
           echo "本次范围: $SCOPE"
           echo "SCOPE=$SCOPE" >> "$GITHUB_ENV"
 
